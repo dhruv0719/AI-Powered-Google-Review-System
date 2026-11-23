@@ -1,0 +1,61 @@
+/* Minimal, Accessible Baseline Stylesheet for Customer Review Flow */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* High-contrast focus indicator for keyboard / switch users (WCAG 2.4.7) */
+:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Remove distracting outline for mouse users while preserving :focus-visible */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Accessible Visually Hidden Utility for screen-reader-only native radio inputs */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Tactile mobile press feedback */
+.touch-press {
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+
+.touch-press:active {
+  transform: scale(0.98);
+  opacity: 0.95;
+}
+
+/* Focus-within highlight for star radio item */
+.star-radio-item:focus-within {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Focus-within highlight for consent checkbox container */
+.consent-container:focus-within {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
