@@ -13,12 +13,6 @@
     "dev:backend": "npm run dev --workspace=apps/backend",
     "dev:frontend": "npm run dev --workspace=apps/frontend"
   },
-  "overrides": {
-    "esbuild": "^0.25.0",
-    "@esbuild-kit/core-utils": {
-      "esbuild": "^0.25.0"
-    }
-  },
   "devDependencies": {
     "typescript": "^5.7.2"
   }
