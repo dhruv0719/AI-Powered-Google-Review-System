@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { eq, and, sql } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
-import { tenants, tenantMemberships, locations, services } from '../drizzle/schema.js';
+import { tenants, tenantMemberships, locations, services, qrCampaigns } from '../drizzle/schema.js';
 import {
   CreateLocationSchema,
   UpdateLocationSchema,
@@ -373,6 +373,26 @@ export const locationRoutes: FastifyPluginAsync = async (fastify: FastifyInstanc
             targetIsPrimary = true;
           } else {
             targetIsPrimary = false;
+          }
+        }
+
+        // Check if removing Google Review URL while active campaigns exist
+        if (
+          body.googleReviewUrl === null ||
+          (body.googleReviewUrl !== undefined && body.googleReviewUrl.trim() === '')
+        ) {
+          const [activeCampaign] = await tx
+            .select({ count: sql<number>`count(*)::int` })
+            .from(qrCampaigns)
+            .where(and(eq(qrCampaigns.locationId, locationId), eq(qrCampaigns.status, 'active')));
+
+          if (activeCampaign && activeCampaign.count > 0) {
+            return {
+              errorStatus: 400,
+              errorCode: ErrorCodes.CANNOT_REMOVE_GOOGLE_URL_ACTIVE_CAMPAIGN,
+              message:
+                'Cannot remove Google Review URL while active QR campaigns depend on it. Deactivate or revoke campaigns first.',
+            };
           }
         }
 

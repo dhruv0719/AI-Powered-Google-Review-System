@@ -17,6 +17,7 @@ const EnvSchema = z.object({
     .string()
     .default('false')
     .transform((val) => val === 'true'),
+  PUBLIC_WEB_URL: z.string().default('http://localhost:5173'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

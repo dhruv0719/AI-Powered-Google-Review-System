@@ -8,20 +8,34 @@ import { authRoutes } from './routes/auth.routes.js';
 import { tenantRoutes } from './routes/tenant.routes.js';
 import { locationRoutes } from './routes/location.routes.js';
 import { serviceRoutes } from './routes/service.routes.js';
+import { campaignRoutes } from './routes/campaign.routes.js';
+import { publicRoutes } from './routes/public.routes.js';
+import { feedbackRoutes } from './routes/feedback.routes.js';
 import { ErrorCodes } from '@review-system/shared';
 
 export function buildServer(): FastifyInstance {
   const env = getEnv();
 
   const fastify = Fastify({
+    trustProxy: true,
     logger: {
       level: env.NODE_ENV === 'test' ? 'silent' : 'info',
       redact: {
         paths: [
           'req.body.password',
           'req.body.feedback',
+          'req.body.feedbackText',
+          'req.body.customerContact',
           'req.body.feedback_text',
           'req.body.customer_contact',
+          'req.headers.cookie',
+          'body.password',
+          'body.feedback',
+          'body.feedbackText',
+          'body.customerContact',
+          'body.feedback_text',
+          'body.customer_contact',
+          'headers.cookie',
           'res.body.draft',
         ],
         censor: '[REDACTED]',
@@ -56,6 +70,9 @@ export function buildServer(): FastifyInstance {
   fastify.register(tenantRoutes, { prefix: '/api/v1/owner/tenants' });
   fastify.register(locationRoutes, { prefix: '/api/v1/owner/tenants' });
   fastify.register(serviceRoutes, { prefix: '/api/v1/owner/tenants' });
+  fastify.register(campaignRoutes, { prefix: '/api/v1/owner/tenants' });
+  fastify.register(feedbackRoutes, { prefix: '/api/v1/owner/tenants' });
+  fastify.register(publicRoutes, { prefix: '/api/v1/public' });
 
   // Centralized Error Handler
   fastify.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
