@@ -32,3 +32,32 @@ export interface ApiErrorEnvelope {
     requestId?: string;
   };
 }
+
+export interface LocationDTO {
+  id: string;
+  tenantId: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  phone: string | null;
+  googleReviewUrl: string | null;
+  isPrimary: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  activeServiceCount?: number;
+}
+
+export interface ServiceDTO {
+  id: string;
+  tenantId: string;
+  locationId: string;
+  name: string;
+  description: string | null;
+  displayOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

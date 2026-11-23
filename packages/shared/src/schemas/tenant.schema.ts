@@ -30,5 +30,16 @@ export const SwitchTenantSchema = z
   })
   .strict();
 
+export const UpdateTenantSchema = z
+  .object({
+    displayName: z
+      .string()
+      .trim()
+      .min(2, { message: 'Business name must be at least 2 characters' })
+      .max(150),
+  })
+  .strict();
+
 export type CreateTenantInput = z.infer<typeof CreateTenantSchema>;
 export type SwitchTenantInput = z.infer<typeof SwitchTenantSchema>;
+export type UpdateTenantInput = z.infer<typeof UpdateTenantSchema>;
