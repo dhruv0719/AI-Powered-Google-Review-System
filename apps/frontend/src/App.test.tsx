@@ -36,6 +36,13 @@ describe('App Routing', () => {
       'Harsh Custom Car Accessories'
     );
     expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+
+    // Verify PublicCustomerLayout integration
+    const main = screen.getByRole('main');
+    expect(main).toHaveAttribute('id', 'main-content');
+    expect(screen.getByTestId('customer-layout-footer')).toHaveTextContent(
+      'Powered by Review System'
+    );
   });
 
   it('2. should route / (or owner path) to OwnerPortal without regression', async () => {
@@ -52,5 +59,6 @@ describe('App Routing', () => {
     });
 
     expect(screen.getByText('Review SaaS Portal')).toBeInTheDocument();
+    expect(screen.queryByTestId('customer-layout-footer')).not.toBeInTheDocument();
   });
 });

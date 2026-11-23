@@ -1,6 +1,7 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { PublicCustomerLayout } from '../../layouts/PublicCustomerLayout.js';
 import { QRScanLanding } from './QRScanLanding.js';
 import { publicApi, PublicApiError } from '../../services/publicApi.js';
 import { ErrorCodes } from '@review-system/shared';
@@ -31,7 +32,9 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
     return render(
       <MemoryRouter initialEntries={[`/q/${code}`]}>
         <Routes>
-          <Route path="/q/:code" element={<QRScanLanding />} />
+          <Route element={<PublicCustomerLayout />}>
+            <Route path="/q/:code" element={<QRScanLanding />} />
+          </Route>
         </Routes>
       </MemoryRouter>
     );
@@ -380,6 +383,7 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
     });
 
     const main = screen.getByRole('main');
+    expect(main).toHaveAttribute('id', 'main-content');
     expect(main).toContainElement(screen.getByTestId('business-name'));
     expect(main).toContainElement(screen.getByTestId('google-review-cta'));
   });
