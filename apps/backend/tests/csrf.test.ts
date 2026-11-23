@@ -46,7 +46,7 @@ describe('CSRF Protection & Cookie Security Verification Tests', () => {
     expect(cookie?.httpOnly).toBe(true);
     expect(cookie?.sameSite?.toLowerCase()).toBe('lax');
     expect(cookie?.path).toBe('/');
-    expect(cookie?.maxAge).toBe(AuthConstants.SESSION_TTL_DAYS * 24 * 60 * 60);
+    expect(cookie?.maxAge).toBe(7 * 24 * 60 * 60); // 7-day session lifetime (604,800s)
   });
 
   // 2. Reject mismatched Origin
@@ -212,20 +212,59 @@ describe('CSRF Protection & Cookie Security Verification Tests', () => {
     expect(res.json().user.email).toBe('csrf-tester@example.com');
   });
 
-  // 10. API clients using Bearer token are exempt from CSRF Origin check
-  it('10. should allow Bearer token authenticated state-changing requests without Origin', async () => {
-    const res = await app.inject({
+  // 10. Prove that supplying an Authorization header cannot bypass cookie-based CSRF protection
+  it('10. should prevent bypassing cookie-based CSRF protection by supplying an Authorization header', async () => {
+    // Attempt 1: Valid session cookie + arbitrary Bearer header + Missing Origin
+    const resNoOrigin = await app.inject({
       method: 'POST',
       url: '/api/v1/owner/tenants',
       headers: {
-        authorization: `Bearer ${sessionCookie}`,
+        authorization: 'Bearer arbitrary-bypass-attempt-token',
+      },
+      cookies: {
+        [AuthConstants.COOKIE_NAME]: sessionCookie,
       },
       payload: {
-        displayName: 'API Client Branch',
+        displayName: 'CSRF Exploit Attempt 1',
       },
     });
 
-    expect(res.statusCode).toBe(201);
-    expect(res.json().displayName).toBe('API Client Branch');
+    expect(resNoOrigin.statusCode).toBe(403);
+    expect(resNoOrigin.json().error.code).toBe(ErrorCodes.FORBIDDEN);
+    expect(resNoOrigin.json().error.message).toBe('Origin or Referer header required for state-changing requests');
+
+    // Attempt 2: Valid session cookie + arbitrary Bearer header + Malicious Origin
+    const resMismatchedOrigin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/owner/tenants',
+      headers: {
+        origin: 'http://attacker-site.com',
+        authorization: 'Bearer arbitrary-bypass-attempt-token',
+      },
+      cookies: {
+        [AuthConstants.COOKIE_NAME]: sessionCookie,
+      },
+      payload: {
+        displayName: 'CSRF Exploit Attempt 2',
+      },
+    });
+
+    expect(resMismatchedOrigin.statusCode).toBe(403);
+    expect(resMismatchedOrigin.json().error.code).toBe(ErrorCodes.FORBIDDEN);
+    expect(resMismatchedOrigin.json().error.message).toContain('Cross-Site Request Forgery blocked');
+  });
+
+  // 11. Prove that Bearer tokens alone are not accepted (cookies are the sole authenticated channel)
+  it('11. should reject requests relying solely on Bearer authorization headers with 401 UNAUTHORIZED', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: {
+        authorization: `Bearer ${sessionCookie}`,
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe(ErrorCodes.UNAUTHORIZED);
   });
 });

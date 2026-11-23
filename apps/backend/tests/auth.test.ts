@@ -41,11 +41,19 @@ describe('Authentication & Session Integration Tests', () => {
     expect(body.activeTenant.role).toBe('owner');
     expect(body.activeTenant.status).toBe('active');
 
-    // Cookie verification
+    // Cookie & 7-day session verification
     const cookies = res.cookies;
     const sessionCookie = cookies.find((c) => c.name === AuthConstants.COOKIE_NAME);
     expect(sessionCookie).toBeDefined();
     expect(sessionCookie?.httpOnly).toBe(true);
+    expect(sessionCookie?.maxAge).toBe(7 * 24 * 60 * 60); // 7 days in seconds
+
+    // Database session expiration verification (7 days from now)
+    const [dbSession] = await db.select().from(sessions);
+    expect(dbSession).toBeDefined();
+    const expectedExpiry = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    const actualExpiry = new Date(dbSession.expiresAt).getTime();
+    expect(Math.abs(actualExpiry - expectedExpiry)).toBeLessThan(15000); // within 15 seconds
   });
 
   // 2. Duplicate email rejection
@@ -212,6 +220,11 @@ describe('Authentication & Session Integration Tests', () => {
 
     expect(expiredRes.statusCode).toBe(401);
     expect(expiredRes.json().error.code).toBe(ErrorCodes.UNAUTHORIZED);
+
+    // Verify cookie was cleared
+    const clearedCookie = expiredRes.cookies.find((c) => c.name === AuthConstants.COOKIE_NAME);
+    expect(clearedCookie).toBeDefined();
+    expect(clearedCookie?.value).toBe('');
   });
 
   // 7. Logout revocation
