@@ -24,6 +24,7 @@ export const ErrorCodes = {
   ALREADY_SUBMITTED: 'ALREADY_SUBMITTED',
   INVALID_STATUS_TRANSITION: 'INVALID_STATUS_TRANSITION',
   INVALID_SESSION: 'INVALID_SESSION',
+  RATE_LIMITED: 'RATE_LIMITED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
