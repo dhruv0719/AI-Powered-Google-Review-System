@@ -150,85 +150,69 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
 
   if (loading) {
     return (
-      <main
+      <div
         role="status"
         aria-live="polite"
         style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
+          textAlign: 'center',
+          padding: '40px 16px',
           color: '#4b5563',
-          backgroundColor: '#f3f4f6',
-          padding: '20px 16px',
+          fontSize: '15px',
         }}
       >
         Loading customer review page...
-      </main>
+      </div>
     );
   }
 
   if (error || !data) {
     return (
-      <main
+      <div
+        role="alert"
         style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
-          backgroundColor: '#f3f4f6',
-          padding: '20px 16px',
+          width: '100%',
+          backgroundColor: '#fff',
+          borderRadius: '12px',
+          padding: '32px 24px',
+          textAlign: 'center',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          boxSizing: 'border-box',
         }}
       >
-        <div
-          role="alert"
+        <div style={{ fontSize: '40px', marginBottom: '12px' }} aria-hidden="true">&#9888;</div>
+        <h1 style={{ margin: '0 0 8px 0', fontSize: '20px', color: '#111827', fontWeight: 700 }}>
+          Review Page Unavailable
+        </h1>
+        <p style={{ margin: 0, fontSize: '14px', color: '#4b5563', lineHeight: 1.5 }}>
+          {error || 'This review link is invalid, expired, or inactive.'}
+        </p>
+
+        <button
+          type="button"
+          data-testid="retry-button"
+          className="touch-press"
+          onClick={loadCampaign}
+          disabled={loading}
           style={{
-            maxWidth: '440px',
-            width: '100%',
-            backgroundColor: '#fff',
-            borderRadius: '12px',
-            padding: '32px 24px',
-            textAlign: 'center',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+            marginTop: '20px',
+            minHeight: '44px',
+            minWidth: '120px',
+            padding: '12px 24px',
+            backgroundColor: '#2563eb',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '15px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
-          <div style={{ fontSize: '40px', marginBottom: '12px' }} aria-hidden="true">&#9888;</div>
-          <h1 style={{ margin: '0 0 8px 0', fontSize: '20px', color: '#111827', fontWeight: 700 }}>
-            Review Page Unavailable
-          </h1>
-          <p style={{ margin: 0, fontSize: '14px', color: '#4b5563', lineHeight: 1.5 }}>
-            {error || 'This review link is invalid, expired, or inactive.'}
-          </p>
-
-          <button
-            type="button"
-            data-testid="retry-button"
-            className="touch-press"
-            onClick={loadCampaign}
-            disabled={loading}
-            style={{
-              marginTop: '20px',
-              minHeight: '44px',
-              minWidth: '120px',
-              padding: '12px 24px',
-              backgroundColor: '#2563eb',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '15px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            Try Again
-          </button>
-        </div>
-      </main>
+          Try Again
+        </button>
+      </div>
     );
   }
 
@@ -239,143 +223,130 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
   const locationAddress = [data.location.address, data.location.city].filter(Boolean).join(', ');
 
   return (
-    <main
+    <div
       style={{
-        minHeight: '100vh',
-        backgroundColor: '#f3f4f6',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        padding: '20px 12px',
+        width: '100%',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
+        gap: '16px',
       }}
     >
-      <div
+      {/* Business Branding Header */}
+      <header
         style={{
-          maxWidth: '520px',
-          width: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
+          backgroundColor: '#fff',
+          borderRadius: '12px',
+          padding: '24px 20px',
+          textAlign: 'center',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+          borderTop: `4px solid ${brandColor}`,
         }}
       >
-        {/* Business Branding Header */}
-        <header
+        <h1
+          data-testid="business-name"
           style={{
-            backgroundColor: '#fff',
-            borderRadius: '12px',
-            padding: '24px 20px',
-            textAlign: 'center',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-            borderTop: `4px solid ${brandColor}`,
+            margin: '0 0 6px 0',
+            fontSize: '22px',
+            color: '#111827',
+            fontWeight: 700,
+            lineHeight: 1.25,
+            wordBreak: 'break-word',
           }}
         >
-          <h1
-            data-testid="business-name"
-            style={{
-              margin: '0 0 6px 0',
-              fontSize: '22px',
-              color: '#111827',
-              fontWeight: 700,
-              lineHeight: 1.25,
-              wordBreak: 'break-word',
-            }}
-          >
-            {data.tenant.displayName}
-          </h1>
+          {data.tenant.displayName}
+        </h1>
+        <p
+          data-testid="location-name"
+          style={{
+            margin: '0 0 4px 0',
+            fontSize: '15px',
+            color: '#374151',
+            fontWeight: 600,
+            lineHeight: 1.3,
+          }}
+        >
+          {data.location.name}
+        </p>
+        {locationAddress && (
           <p
-            data-testid="location-name"
+            data-testid="location-address"
             style={{
-              margin: '0 0 4px 0',
-              fontSize: '15px',
-              color: '#374151',
-              fontWeight: 600,
-              lineHeight: 1.3,
+              margin: 0,
+              fontSize: '13px',
+              color: '#4b5563', // WCAG AA compliant >= 4.5:1 contrast against #ffffff
+              lineHeight: 1.4,
             }}
           >
-            {data.location.name}
+            {locationAddress}
           </p>
-          {locationAddress && (
-            <p
-              data-testid="location-address"
-              style={{
-                margin: 0,
-                fontSize: '13px',
-                color: '#4b5563', // WCAG AA compliant >= 4.5:1 contrast against #ffffff
-                lineHeight: 1.4,
-              }}
-            >
-              {locationAddress}
-            </p>
-          )}
-        </header>
+        )}
+      </header>
 
-        {/* UNCONDITIONAL Google Review Action (ZERO review gating) */}
-        <section
-          aria-label="Google Review Action"
+      {/* UNCONDITIONAL Google Review Action (ZERO review gating) */}
+      <section
+        aria-label="Google Review Action"
+        style={{
+          backgroundColor: '#fff',
+          borderRadius: '12px',
+          padding: '24px 20px',
+          textAlign: 'center',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+          border: `2px solid ${brandColor}`,
+        }}
+      >
+        <div
+          style={{ display: 'inline-block', fontSize: '32px', marginBottom: '8px' }}
+          aria-hidden="true"
+        >
+          &#11088;
+        </div>
+        <h2
           style={{
-            backgroundColor: '#fff',
-            borderRadius: '12px',
-            padding: '24px 20px',
-            textAlign: 'center',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-            border: `2px solid ${brandColor}`,
+            margin: '0 0 8px 0',
+            fontSize: '18px',
+            color: '#111827',
+            fontWeight: 600,
+            lineHeight: 1.3,
           }}
         >
-          <div
-            style={{ display: 'inline-block', fontSize: '32px', marginBottom: '8px' }}
-            aria-hidden="true"
-          >
-            &#11088;
-          </div>
-          <h2
-            style={{
-              margin: '0 0 8px 0',
-              fontSize: '18px',
-              color: '#111827',
-              fontWeight: 600,
-              lineHeight: 1.3,
-            }}
-          >
-            Support Us on Google
-          </h2>
-          <p
-            style={{
-              margin: '0 0 16px 0',
-              fontSize: '14px',
-              color: '#4b5563',
-              lineHeight: 1.45,
-            }}
-          >
-            Public Google reviews directly support our staff and help other customers find us!
-          </p>
-          <a
-            data-testid="google-review-cta"
-            className="touch-press"
-            href={data.location.googleReviewUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '100%',
-              minHeight: '48px', // WCAG 2.5.5 touch target >= 44x44px (48px thumb standard)
-              padding: '14px 20px',
-              backgroundColor: brandColor,
-              color: ctaTextColor, // Mathematically calculated contrast >= 4.5:1
-              borderRadius: '8px',
-              textDecoration: 'none',
-              fontSize: '16px',
-              fontWeight: 600,
-              boxShadow: '0 2px 4px rgba(0, 0, 0, 0.12)',
-              userSelect: 'none',
-            }}
-          >
-            Write a Review on Google &#8599;
-          </a>
-        </section>
-      </div>
-    </main>
+          Support Us on Google
+        </h2>
+        <p
+          style={{
+            margin: '0 0 16px 0',
+            fontSize: '14px',
+            color: '#4b5563',
+            lineHeight: 1.45,
+          }}
+        >
+          Public Google reviews directly support our staff and help other customers find us!
+        </p>
+        <a
+          data-testid="google-review-cta"
+          className="touch-press"
+          href={data.location.googleReviewUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            minHeight: '48px', // WCAG 2.5.5 touch target >= 44x44px (48px thumb standard)
+            padding: '14px 20px',
+            backgroundColor: brandColor,
+            color: ctaTextColor, // Mathematically calculated contrast >= 4.5:1
+            borderRadius: '8px',
+            textDecoration: 'none',
+            fontSize: '16px',
+            fontWeight: 600,
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.12)',
+            userSelect: 'none',
+          }}
+        >
+          Write a Review on Google &#8599;
+        </a>
+      </section>
+    </div>
   );
 }
