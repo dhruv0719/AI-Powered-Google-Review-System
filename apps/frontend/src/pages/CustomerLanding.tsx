@@ -1,10 +1,49 @@
 import { useState, useEffect } from 'react';
-import { PublicQRResolutionDTO, sanitizeBrandColor } from '@review-system/shared';
+import {
+  PublicQRResolutionDTO,
+  sanitizeBrandColor,
+  isValidGoogleReviewUrl,
+  ErrorCodes,
+} from '@review-system/shared';
 import { publicApi, PublicApiError } from '../services/publicApi.js';
 import { PrivateFeedbackForm } from '../components/PrivateFeedbackForm.js';
 
 export interface CustomerLandingProps {
   code: string;
+}
+
+function isResolutionDataValid(data: unknown): data is PublicQRResolutionDTO {
+  if (!data || typeof data !== 'object') return false;
+  const c = data as Partial<PublicQRResolutionDTO>;
+  return Boolean(
+    c.tenant?.displayName?.trim() &&
+    c.location?.name?.trim() &&
+    c.location?.googleReviewUrl &&
+    isValidGoogleReviewUrl(c.location.googleReviewUrl)
+  );
+}
+
+function mapCustomerErrorMessage(err: unknown): string {
+  if (err instanceof PublicApiError) {
+    switch (err.code) {
+      case ErrorCodes.CAMPAIGN_NOT_FOUND:
+        return 'This review link is not found or has expired.';
+      case ErrorCodes.CAMPAIGN_INACTIVE:
+        return 'This review campaign is currently inactive.';
+      case ErrorCodes.SERVICE_UNAVAILABLE:
+        return 'This review service is currently unavailable.';
+      case ErrorCodes.TENANT_SUSPENDED:
+        return 'This review service is currently unavailable.';
+      case ErrorCodes.RATE_LIMITED:
+        return 'Too many requests. Please try again in a few minutes.';
+      default:
+        if (err.statusCode === 404) return 'This review link is not found or has expired.';
+        if (err.statusCode === 403) return 'This review service is currently unavailable.';
+        if (err.statusCode === 429) return 'Too many requests. Please try again in a few minutes.';
+        return 'This review link is currently unavailable. Please try again later.';
+    }
+  }
+  return 'Unable to load review page. Please check your connection and try again.';
 }
 
 /**
@@ -24,17 +63,17 @@ export function CustomerLanding({ code }: CustomerLandingProps) {
         setError(null);
         const res = await publicApi.resolvePublicCampaign(code);
         if (isMounted) {
-          setData(res);
+          if (!isResolutionDataValid(res)) {
+            setError('This review link is invalid, expired, or inactive.');
+            setData(null);
+          } else {
+            setData(res);
+          }
         }
       } catch (err: unknown) {
         if (!isMounted) return;
-        if (err instanceof PublicApiError) {
-          setError(err.message || 'This review link is invalid, expired, or inactive.');
-        } else if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError('This review link is invalid, expired, or inactive.');
-        }
+        setData(null);
+        setError(mapCustomerErrorMessage(err));
       } finally {
         if (isMounted) {
           setLoading(false);

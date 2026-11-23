@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { publicApi } from '../services/publicApi.js';
+import { useState, useRef } from 'react';
+import { ErrorCodes } from '@review-system/shared';
+import { publicApi, PublicApiError } from '../services/publicApi.js';
 
 export interface ServiceItem {
   id: string;
@@ -34,14 +35,37 @@ export function PrivateFeedbackForm({
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Lazy session creation on first user interaction
-  const ensureSession = async () => {
-    if (sessionInitiated) return;
+  // In-flight session creation promise ref to prevent duplicate/racing session requests
+  const sessionPromiseRef = useRef<Promise<unknown> | null>(null);
+  // Synchronous submission lock to prevent duplicate executions before React re-renders
+  const isSubmittingRef = useRef(false);
+
+  // Lazy session creation on first user interaction with concurrency deduplication
+  const ensureSession = async (): Promise<boolean> => {
+    if (sessionInitiated) {
+      return true;
+    }
+
+    if (sessionPromiseRef.current) {
+      try {
+        await sessionPromiseRef.current;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    const promise = publicApi.createPublicSession(code);
+    sessionPromiseRef.current = promise;
+
     try {
-      await publicApi.createPublicSession(code);
+      await promise;
       setSessionInitiated(true);
+      return true;
     } catch {
-      // Ignored here; will be re-attempted on submit
+      return false;
+    } finally {
+      sessionPromiseRef.current = null;
     }
   };
 
@@ -59,21 +83,31 @@ export function PrivateFeedbackForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rating || !consentGiven) return;
+
+    // Prevent duplicate submission or invalid submission via synchronous ref lock
+    if (isSubmittingRef.current || submitting || !rating || rating < 1 || rating > 5 || !consentGiven) {
+      return;
+    }
+
+    isSubmittingRef.current = true;
+    setSubmitting(true);
+    setError(null);
 
     try {
-      setSubmitting(true);
-      setError(null);
-
-      // Ensure explicit session cookie is issued
+      // Ensure customer session cookie is issued before submitting feedback
       if (!sessionInitiated) {
-        await publicApi.createPublicSession(code);
-        setSessionInitiated(true);
+        const sessionSuccess = await ensureSession();
+        if (!sessionSuccess) {
+          setError('Unable to start feedback session. Please try again.');
+          isSubmittingRef.current = false;
+          setSubmitting(false);
+          return;
+        }
       }
 
       await publicApi.submitPublicFeedback(code, {
         rating,
-        serviceIds: selectedServiceIds,
+        serviceIds: selectedServiceIds.filter((id) => typeof id === 'string'),
         feedbackText: feedbackText.trim() ? feedbackText.trim() : undefined,
         customerContact: customerContact.trim() ? customerContact.trim() : undefined,
         consentGiven: true,
@@ -83,9 +117,44 @@ export function PrivateFeedbackForm({
       if (onSuccess) {
         onSuccess();
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to submit feedback. Please try again.');
+    } catch (err: unknown) {
+      if (err instanceof PublicApiError) {
+        switch (err.code) {
+          case ErrorCodes.ALREADY_SUBMITTED:
+            setError('Feedback has already been submitted for this session.');
+            break;
+          case ErrorCodes.INVALID_SESSION:
+            setError('Your session has expired. Please select your rating again to refresh.');
+            sessionPromiseRef.current = null;
+            setSessionInitiated(false);
+            break;
+          case ErrorCodes.RATE_LIMITED:
+            setError('Too many requests. Please wait a moment and try again.');
+            break;
+          case ErrorCodes.CAMPAIGN_INACTIVE:
+            setError('This review campaign is currently inactive.');
+            break;
+          case ErrorCodes.TENANT_SUSPENDED:
+            setError('This service is currently unavailable.');
+            break;
+          default:
+            if (err.statusCode === 409) {
+              setError('Feedback has already been submitted for this session.');
+            } else if (err.statusCode === 401) {
+              setError('Your session has expired. Please select your rating again to refresh.');
+              sessionPromiseRef.current = null;
+              setSessionInitiated(false);
+            } else if (err.statusCode === 429) {
+              setError('Too many requests. Please wait a moment and try again.');
+            } else {
+              setError('Unable to submit feedback. Please try again.');
+            }
+        }
+      } else {
+        setError('Unable to submit feedback. Please check your connection and try again.');
+      }
     } finally {
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
   };

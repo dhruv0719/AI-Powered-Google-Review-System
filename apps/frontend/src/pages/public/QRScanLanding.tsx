@@ -1,10 +1,82 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { PublicQRResolutionDTO, sanitizeBrandColor } from '@review-system/shared';
+import {
+  PublicQRResolutionDTO,
+  sanitizeBrandColor,
+  isValidGoogleReviewUrl,
+  ErrorCodes,
+} from '@review-system/shared';
 import { publicApi, PublicApiError } from '../../services/publicApi.js';
 
 export interface QRScanLandingProps {
   code?: string;
+}
+
+/**
+ * Validates the public QR resolution DTO structure defensively.
+ * Enforces non-empty strings and strictly validated Google Review URLs.
+ */
+function isResolutionDataValid(data: unknown): data is PublicQRResolutionDTO {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  const candidate = data as Partial<PublicQRResolutionDTO>;
+  if (
+    !candidate.tenant ||
+    typeof candidate.tenant.displayName !== 'string' ||
+    !candidate.tenant.displayName.trim()
+  ) {
+    return false;
+  }
+  if (
+    !candidate.location ||
+    typeof candidate.location.name !== 'string' ||
+    !candidate.location.name.trim()
+  ) {
+    return false;
+  }
+  if (
+    !candidate.location.googleReviewUrl ||
+    !isValidGoogleReviewUrl(candidate.location.googleReviewUrl)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Maps API errors to customer-safe messages.
+ * Never exposes raw backend errors, stack traces, or internal server details.
+ */
+function mapCustomerErrorMessage(err: unknown): string {
+  if (err instanceof PublicApiError) {
+    switch (err.code) {
+      case ErrorCodes.CAMPAIGN_NOT_FOUND:
+        return 'This review link is not found or has expired.';
+      case ErrorCodes.CAMPAIGN_INACTIVE:
+        return 'This review campaign is currently inactive.';
+      case ErrorCodes.SERVICE_UNAVAILABLE:
+        return 'This review service is currently unavailable.';
+      case ErrorCodes.TENANT_SUSPENDED:
+        return 'This review service is currently unavailable.';
+      case ErrorCodes.RATE_LIMITED:
+        return 'Too many requests. Please try again in a few minutes.';
+      default:
+        if (err.statusCode === 404) {
+          return 'This review link is not found or has expired.';
+        }
+        if (err.statusCode === 403) {
+          return 'This review service is currently unavailable.';
+        }
+        if (err.statusCode === 429) {
+          return 'Too many requests. Please try again in a few minutes.';
+        }
+        return 'This review link is currently unavailable. Please try again later.';
+    }
+  }
+
+  // Network drops, offline, aborts, or unexpected exceptions
+  return 'Unable to load review page. Please check your connection and try again.';
 }
 
 export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
@@ -15,53 +87,65 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Guards against race conditions and overlapping requests
+  const requestIdRef = useRef(0);
+  const inFlightRef = useRef(false);
+
+  const loadCampaign = useCallback(async () => {
     if (!code) {
       setLoading(false);
-      setError('Invalid review link: missing campaign code.');
+      setError('This review link is invalid, expired, or inactive.');
       return;
     }
 
-    let isMounted = true;
+    // Prevent overlapping resolution requests
+    if (inFlightRef.current) {
+      return;
+    }
+    inFlightRef.current = true;
 
-    const loadCampaign = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await publicApi.resolvePublicCampaign(code);
-        if (isMounted) {
-          setData(res);
-        }
-      } catch (err: unknown) {
-        if (!isMounted) return;
-        if (err instanceof PublicApiError) {
-          if (err.statusCode === 404) {
-            setError('This review link is not found or has expired.');
-          } else if (err.statusCode === 403) {
-            setError('This review campaign is currently inactive.');
-          } else if (err.statusCode === 429) {
-            setError('Too many requests. Please try again in a few minutes.');
-          } else {
-            setError(err.message || 'This review link is invalid, expired, or inactive.');
-          }
-        } else if (err instanceof Error) {
-          setError(err.message || 'This review link is invalid, expired, or inactive.');
-        } else {
-          setError('This review link is invalid, expired, or inactive.');
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+    const currentRequestId = ++requestIdRef.current;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await publicApi.resolvePublicCampaign(code);
+
+      // Discard response if a newer request has started
+      if (currentRequestId !== requestIdRef.current) {
+        return;
       }
-    };
 
+      // Defensive validation of the resolution response
+      if (!isResolutionDataValid(res)) {
+        setData(null);
+        setError('This review link is invalid, expired, or inactive.');
+      } else {
+        setData(res);
+        setError(null);
+      }
+    } catch (err: unknown) {
+      if (currentRequestId !== requestIdRef.current) {
+        return;
+      }
+      setData(null);
+      setError(mapCustomerErrorMessage(err));
+    } finally {
+      inFlightRef.current = false;
+      if (currentRequestId === requestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [code]);
+
+  useEffect(() => {
     loadCampaign();
 
     return () => {
-      isMounted = false;
+      // Invalidate any in-flight response on unmount
+      requestIdRef.current++;
     };
-  }, [code]);
+  }, [loadCampaign]);
 
   if (loading) {
     return (
@@ -116,6 +200,27 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
           <p style={{ margin: 0, fontSize: '14px', color: '#6b7280', lineHeight: 1.5 }}>
             {error || 'This review link is invalid, expired, or inactive.'}
           </p>
+
+          <button
+            type="button"
+            data-testid="retry-button"
+            onClick={loadCampaign}
+            disabled={loading}
+            style={{
+              marginTop: '20px',
+              padding: '10px 20px',
+              backgroundColor: '#2563eb',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background-color 0.15s ease',
+            }}
+          >
+            Try Again
+          </button>
         </div>
       </div>
     );
