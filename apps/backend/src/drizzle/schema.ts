@@ -10,6 +10,9 @@ import {
   uniqueIndex,
   integer,
   check,
+  smallint,
+  text,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -160,7 +163,123 @@ export const services = pgTable(
       columns: [table.tenantId, table.locationId],
       foreignColumns: [locations.tenantId, locations.id],
     }).onDelete('cascade'),
+    unique('unique_tenant_location_service').on(table.tenantId, table.locationId, table.id),
     index('idx_services_location').on(table.locationId),
     index('idx_services_tenant').on(table.tenantId),
+  ]
+);
+
+// 8. QR Campaigns (Physical Location-Scoped Campaigns)
+export const qrCampaigns = pgTable(
+  'qr_campaigns',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    locationId: uuid('location_id').notNull(),
+    code: varchar('code', { length: 32 }).notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    status: varchar('status', { length: 20 }).notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('unique_campaign_code').on(table.code),
+    unique('unique_tenant_location_campaign').on(table.tenantId, table.locationId, table.id),
+    check('check_campaign_status', sql`${table.status} IN ('active', 'inactive', 'revoked')`),
+    foreignKey({
+      columns: [table.tenantId, table.locationId],
+      foreignColumns: [locations.tenantId, locations.id],
+    }).onDelete('cascade'),
+    index('idx_qr_campaigns_code').on(table.code),
+    index('idx_qr_campaigns_location').on(table.locationId),
+    index('idx_qr_campaigns_tenant').on(table.tenantId),
+  ]
+);
+
+// 9. Ephemeral Sessions (Short-Lived Anonymous Customer Interaction Sessions)
+export const ephemeralSessions = pgTable(
+  'ephemeral_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    locationId: uuid('location_id').notNull(),
+    campaignId: uuid('campaign_id').notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    issuedCode: varchar('issued_code', { length: 32 }).notNull(),
+    feedbackSubmittedAt: timestamp('feedback_submitted_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('unique_ephemeral_token_hash').on(table.tokenHash),
+    unique('unique_ephemeral_session_composite').on(table.tenantId, table.locationId, table.campaignId, table.id),
+    foreignKey({
+      columns: [table.tenantId, table.locationId, table.campaignId],
+      foreignColumns: [qrCampaigns.tenantId, qrCampaigns.locationId, qrCampaigns.id],
+    }).onDelete('cascade'),
+    index('idx_ephemeral_sessions_expires_at').on(table.expiresAt),
+  ]
+);
+
+// 10. Private Feedback (Direct Customer-to-Merchant Operational Feedback)
+export const privateFeedback = pgTable(
+  'private_feedback',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: uuid('tenant_id').notNull(),
+    locationId: uuid('location_id').notNull(),
+    campaignId: uuid('campaign_id').notNull(),
+    sessionId: uuid('session_id').notNull(),
+    rating: smallint('rating').notNull(),
+    feedbackText: text('feedback_text'),
+    customerContact: varchar('customer_contact', { length: 100 }),
+    consentGiven: boolean('consent_given').notNull(),
+    consentAt: timestamp('consent_at', { withTimezone: true }).notNull().defaultNow(),
+    consentVersion: varchar('consent_version', { length: 20 }).notNull().default('v1.0'),
+    status: varchar('status', { length: 20 }).notNull().default('new'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('unique_session_private_feedback').on(table.sessionId),
+    unique('unique_tenant_location_feedback').on(table.tenantId, table.locationId, table.id),
+    check('check_feedback_rating', sql`${table.rating} >= 1 AND ${table.rating} <= 5`),
+    check('check_feedback_text_length', sql`${table.feedbackText} IS NULL OR (char_length(trim(${table.feedbackText})) >= 3 AND char_length(${table.feedbackText}) <= 1000)`),
+    check('check_consent_affirmative', sql`${table.consentGiven} = true`),
+    check('check_feedback_status', sql`${table.status} IN ('new', 'reviewed', 'archived')`),
+    foreignKey({
+      columns: [table.tenantId, table.locationId, table.campaignId, table.sessionId],
+      foreignColumns: [ephemeralSessions.tenantId, ephemeralSessions.locationId, ephemeralSessions.campaignId, ephemeralSessions.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.tenantId, table.locationId, table.campaignId],
+      foreignColumns: [qrCampaigns.tenantId, qrCampaigns.locationId, qrCampaigns.id],
+    }).onDelete('cascade'),
+    index('idx_private_feedback_tenant_created').on(table.tenantId, table.createdAt),
+    index('idx_private_feedback_location').on(table.locationId),
+  ]
+);
+
+// 11. Private Feedback Services (Association Table with Submission-Time Service Snapshot)
+export const privateFeedbackServices = pgTable(
+  'private_feedback_services',
+  {
+    feedbackId: uuid('feedback_id').notNull(),
+    serviceId: uuid('service_id').notNull(),
+    tenantId: uuid('tenant_id').notNull(),
+    locationId: uuid('location_id').notNull(),
+    serviceNameSnapshot: varchar('service_name_snapshot', { length: 100 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.feedbackId, table.serviceId] }),
+    foreignKey({
+      columns: [table.tenantId, table.locationId, table.feedbackId],
+      foreignColumns: [privateFeedback.tenantId, privateFeedback.locationId, privateFeedback.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.tenantId, table.locationId, table.serviceId],
+      foreignColumns: [services.tenantId, services.locationId, services.id],
+    }).onDelete('cascade'),
   ]
 );
