@@ -17,6 +17,7 @@ import {
   ErrorCodes,
   PublicQRResolutionDTO,
   PublicSessionResponseDTO,
+  sanitizeBrandColor,
 } from '@review-system/shared';
 import { generateSessionToken, hashSessionToken } from '../utils/crypto.js';
 import { validatePublicOrigin } from '../utils/csrf.js';
@@ -154,6 +155,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
       const response: PublicQRResolutionDTO = {
         tenant: {
           displayName: tenant.displayName,
+          brandColor: sanitizeBrandColor(tenant.brandColor),
         },
         location: {
           name: location.name,

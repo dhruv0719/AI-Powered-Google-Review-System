@@ -6,6 +6,8 @@ import {
   AuthConstants,
   CustomerSessionConstants,
   PublicQRResolutionDTO,
+  isValidBrandColor,
+  sanitizeBrandColor,
 } from '@review-system/shared';
 import { ephemeralSessions, tenants, locations } from '../src/drizzle/schema.js';
 import { eq } from 'drizzle-orm';
@@ -98,6 +100,8 @@ describe('Public QR Resolution & Explicit Session Issuance Integration Tests', (
     const body: PublicQRResolutionDTO = res.json();
 
     expect(body.tenant.displayName).toBe('The Artisan Bakery');
+    expect(body.tenant.brandColor).toBe('#2563EB');
+    expect((body.tenant as any).logoUrl).toBeUndefined();
     expect(body.location.name).toBe('Downtown Bakery');
     expect(body.location.googleReviewUrl).toBe('https://g.page/r/artisan_bakery/review');
     expect(body.services).toHaveLength(1);
@@ -252,5 +256,58 @@ describe('Public QR Resolution & Explicit Session Issuance Integration Tests', (
     });
 
     expect(res.statusCode).toBe(413);
+  });
+
+  it('8. should return sanitized brandColor and fall back to #2563EB if null or malformed while excluding logoUrl', async () => {
+    const { tenantId, campaign } = await setupActiveCampaign();
+
+    // 1. Custom valid brandColor
+    await db.update(tenants).set({ brandColor: '#E11D48', logoUrl: 'https://example.com/logo.png' }).where(eq(tenants.id, tenantId));
+    const resValid = await app.inject({
+      method: 'GET',
+      url: `/api/v1/public/qr/${campaign.code}`,
+    });
+    expect(resValid.statusCode).toBe(200);
+    const bodyValid: PublicQRResolutionDTO = resValid.json();
+    expect(bodyValid.tenant.brandColor).toBe('#E11D48');
+    expect((bodyValid.tenant as any).logoUrl).toBeUndefined();
+
+    // 2. Malformed brandColors -> all must safely fall back to #2563EB
+    // Note: long hex (#1234567) exceeds DB varchar(7) column limit, verified via helper assertions below
+    const malformedVariants = [
+      'not-hex',        // arbitrary text
+      '#FFF',           // short hex (3 digits)
+      '123456',         // missing leading #
+      'red',            // named CSS color
+      '#12345G',        // invalid hex character 'G'
+      '#12 45',         // space inside
+    ];
+
+    for (const invalidColor of malformedVariants) {
+      await db.update(tenants).set({ brandColor: invalidColor }).where(eq(tenants.id, tenantId));
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/v1/public/qr/${campaign.code}`,
+      });
+      expect(res.statusCode).toBe(200);
+      const body: PublicQRResolutionDTO = res.json();
+      expect(body.tenant.brandColor).toBe('#2563EB');
+    }
+
+    // Direct helper assertions covering long hex and edge cases beyond DB varchar(7)
+    expect(isValidBrandColor('#1234567')).toBe(false);
+    expect(isValidBrandColor('#12345678')).toBe(false);
+    expect(sanitizeBrandColor('#1234567')).toBe('#2563EB');
+    expect(sanitizeBrandColor('#12345678')).toBe('#2563EB');
+
+    // 3. Null brandColor -> falls back to #2563EB
+    await db.update(tenants).set({ brandColor: null }).where(eq(tenants.id, tenantId));
+    const resNull = await app.inject({
+      method: 'GET',
+      url: `/api/v1/public/qr/${campaign.code}`,
+    });
+    expect(resNull.statusCode).toBe(200);
+    const bodyNull: PublicQRResolutionDTO = resNull.json();
+    expect(bodyNull.tenant.brandColor).toBe('#2563EB');
   });
 });
