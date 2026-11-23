@@ -15,8 +15,8 @@ const EnvSchema = z.object({
   COOKIE_DOMAIN: z.string().optional(),
   COOKIE_SECURE: z
     .string()
-    .transform((val) => val === 'true')
-    .default('false'),
+    .default('false')
+    .transform((val) => val === 'true'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

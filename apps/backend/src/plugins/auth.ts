@@ -94,30 +94,63 @@ const authPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       request.cookies[AuthConstants.COOKIE_NAME] &&
       ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
     ) {
-      const origin = request.headers.origin || request.headers.referer;
+      const originHeader = request.headers.origin || request.headers.referer;
+      if (!originHeader) {
+        reply.status(403).send({
+          error: {
+            code: ErrorCodes.FORBIDDEN,
+            message: 'Origin or Referer header required for state-changing requests',
+          },
+        });
+        return;
+      }
+
       const host = request.headers.host;
-      if (origin && host) {
-        try {
-          const originHost = new URL(origin).host;
-          if (originHost !== host) {
-            reply.status(403).send({
-              error: {
-                code: ErrorCodes.FORBIDDEN,
-                message: 'Cross-Site Request Forgery blocked',
-              },
-            });
-            return;
-          }
-        } catch {
-          // Malformed origin
+      if (!host) {
+        reply.status(403).send({
+          error: {
+            code: ErrorCodes.FORBIDDEN,
+            message: 'Host header missing',
+          },
+        });
+        return;
+      }
+
+      try {
+        const originUrl = new URL(originHeader);
+        const normalizedOriginHost = originUrl.host.replace(/:(80|443)$/, '');
+        const normalizedTargetHost = host.replace(/:(80|443)$/, '');
+
+        // Host mismatch (including port mismatch)
+        if (normalizedOriginHost !== normalizedTargetHost) {
           reply.status(403).send({
             error: {
               code: ErrorCodes.FORBIDDEN,
-              message: 'Invalid origin header',
+              message: 'Cross-Site Request Forgery blocked: host mismatch',
             },
           });
           return;
         }
+
+        // Scheme mismatch check (e.g. http origin vs https request or vice versa)
+        if (request.protocol && originUrl.protocol !== `${request.protocol}:`) {
+          reply.status(403).send({
+            error: {
+              code: ErrorCodes.FORBIDDEN,
+              message: 'Cross-Site Request Forgery blocked: scheme mismatch',
+            },
+          });
+          return;
+        }
+      } catch {
+        // Malformed origin/referer URL
+        reply.status(403).send({
+          error: {
+            code: ErrorCodes.FORBIDDEN,
+            message: 'Invalid origin or referer header',
+          },
+        });
+        return;
       }
     }
 
