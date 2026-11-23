@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestApp } from './setup.js';
 import { FastifyInstance } from 'fastify';
-import { ErrorCodes, AuthConstants } from '@review-system/shared';
+import { ErrorCodes, AuthConstants, Roles } from '@review-system/shared';
 import { tenants, tenantMemberships, sessions } from '../src/drizzle/schema.js';
 import { eq, and } from 'drizzle-orm';
 
@@ -299,5 +299,158 @@ describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
     });
     expect(check2.statusCode).toBe(401);
     expect(check2.json().error.code).toBe(ErrorCodes.UNAUTHORIZED);
+  });
+
+  // Business Profile Updating & Isolation
+  it('should allow owner to update business display name and prevent unauthorized tenant edits', async () => {
+    const userA = await registerUser('tenant_profile_a@test.com', 'Initial Name A');
+    const userB = await registerUser('tenant_profile_b@test.com', 'Initial Name B');
+
+    const tenantAId = userA.body.activeTenant.id;
+    const tenantBId = userB.body.activeTenant.id;
+
+    // User A successfully updates their business name
+    const updateRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/owner/tenants/${tenantAId}`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: userA.cookie },
+      payload: { displayName: 'Updated Business Name A' },
+    });
+    expect(updateRes.statusCode).toBe(200);
+    expect(updateRes.json().displayName).toBe('Updated Business Name A');
+
+    // User A attempts to update User B's business name -> 404
+    const tamperRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/owner/tenants/${tenantBId}`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: userA.cookie },
+      payload: { displayName: 'Hacked Name B' },
+    });
+    expect(tamperRes.statusCode).toBe(404);
+    expect(tamperRes.json().error.code).toBe(ErrorCodes.TENANT_NOT_FOUND);
+  });
+
+  // Explicit OWNER Role Guard Regression Test
+  it('should reject owner operations when user is a tenant member with non-owner role (403 FORBIDDEN)', async () => {
+    const ownerUser = await registerUser('biz_owner@test.com', 'Owner Enterprise');
+    const staffUser = await registerUser('biz_staff@test.com', 'Staff Personal Workspace');
+
+    const enterpriseTenantId = ownerUser.body.activeTenant.id;
+    const staffUserId = staffUser.body.user.id;
+
+    // Simulate adding staffUser as a 'staff' member to Owner Enterprise in database
+    await db.insert(tenantMemberships).values({
+      userId: staffUserId,
+      tenantId: enterpriseTenantId,
+      role: Roles.STAFF,
+    });
+
+    // 1. Staff attempts GET /owner/tenants/:tenantId -> 403 FORBIDDEN
+    const getTenantRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/owner/tenants/${enterpriseTenantId}`,
+      cookies: { [AuthConstants.COOKIE_NAME]: staffUser.cookie },
+    });
+    expect(getTenantRes.statusCode).toBe(403);
+    expect(getTenantRes.json().error.code).toBe(ErrorCodes.FORBIDDEN);
+
+    // 2. Staff attempts PATCH /owner/tenants/:tenantId -> 403 FORBIDDEN
+    const patchTenantRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/owner/tenants/${enterpriseTenantId}`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: staffUser.cookie },
+      payload: { displayName: 'Staff Attempted Edit' },
+    });
+    expect(patchTenantRes.statusCode).toBe(403);
+    expect(patchTenantRes.json().error.code).toBe(ErrorCodes.FORBIDDEN);
+
+    // 3. Staff attempts GET /owner/tenants/:tenantId/locations -> 403 FORBIDDEN
+    const getLocRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/owner/tenants/${enterpriseTenantId}/locations`,
+      cookies: { [AuthConstants.COOKIE_NAME]: staffUser.cookie },
+    });
+    expect(getLocRes.statusCode).toBe(403);
+    expect(getLocRes.json().error.code).toBe(ErrorCodes.FORBIDDEN);
+
+    // 4. Staff attempts POST /owner/tenants/:tenantId/locations -> 403 FORBIDDEN
+    const postLocRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/owner/tenants/${enterpriseTenantId}/locations`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: staffUser.cookie },
+      payload: { name: 'Staff Unauthorized Branch' },
+    });
+    expect(postLocRes.statusCode).toBe(403);
+    expect(postLocRes.json().error.code).toBe(ErrorCodes.FORBIDDEN);
+
+    // 5. Verify the actual Owner can perform these operations successfully
+    const ownerLocRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/owner/tenants/${enterpriseTenantId}/locations`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: ownerUser.cookie },
+      payload: { name: 'Owner Authorized Branch' },
+    });
+    expect(ownerLocRes.statusCode).toBe(201);
+  });
+
+  // Path-Based Multi-Tenant Authorization Policy Regression Test
+  it('should allow multi-tenant owner to access any owned tenant via path parameter without switching active session context', async () => {
+    const user = await registerUser('multi_path_owner@test.com', 'Tenant Alpha Workspace');
+    const tenantAlphaId = user.body.activeTenant.id;
+
+    // Create a second tenant under same user (user is Owner of both)
+    const tBetaRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/owner/tenants',
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+      payload: { displayName: 'Tenant Beta Workspace' },
+    });
+    const tenantBetaId = tBetaRes.json().id;
+
+    // Verify session activeTenantId is still Tenant Alpha
+    const meRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(meRes.json().activeTenant.id).toBe(tenantAlphaId);
+
+    // Directly access Tenant Beta locations WITHOUT switching activeTenantId in session
+    const betaLocListRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/owner/tenants/${tenantBetaId}/locations`,
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(betaLocListRes.statusCode).toBe(200);
+    expect(Array.isArray(betaLocListRes.json().locations)).toBe(true);
+
+    // Create a location in Tenant Beta directly
+    const betaLocCreateRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/owner/tenants/${tenantBetaId}/locations`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+      payload: { name: 'Beta HQ Location' },
+    });
+    expect(betaLocCreateRes.statusCode).toBe(201);
+    expect(betaLocCreateRes.json().name).toBe('Beta HQ Location');
+
+    // Attempting to access an unrelated tenant returns non-disclosing 404
+    const unrelatedUser = await registerUser('unrelated@test.com', 'Unrelated Business');
+    const unrelatedTenantId = unrelatedUser.body.activeTenant.id;
+
+    const unauthorizedRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/owner/tenants/${unrelatedTenantId}/locations`,
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(unauthorizedRes.statusCode).toBe(404);
+    expect(unauthorizedRes.json().error.code).toBe(ErrorCodes.TENANT_NOT_FOUND);
   });
 });
