@@ -7,6 +7,7 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
+    "test:concurrency": "tsx scripts/test-postgres-concurrency.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/drizzle/migrate.ts"
   },

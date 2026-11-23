@@ -22,10 +22,36 @@ import { generateSessionToken, hashSessionToken } from '../utils/crypto.js';
 import { validatePublicOrigin } from '../utils/csrf.js';
 import { getEnv } from '../config/env.js';
 
-export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
+export interface PublicRoutesOptions {
+  rateLimitOverrides?: {
+    qrGetMax?: number;
+    sessionsPostMax?: number;
+    feedbackPostMax?: number;
+  };
+}
+
+export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
+  fastify: FastifyInstance,
+  opts?: PublicRoutesOptions
+) => {
+  const env = getEnv();
+  const isTest = env.NODE_ENV === 'test';
+
+  const qrGetMax = opts?.rateLimitOverrides?.qrGetMax ?? (isTest ? 1000 : 120);
+  const sessionsPostMax = opts?.rateLimitOverrides?.sessionsPostMax ?? (isTest ? 1000 : 30);
+  const feedbackPostMax = opts?.rateLimitOverrides?.feedbackPostMax ?? (isTest ? 1000 : 10);
+
   // 1. Read-only Public QR Resolution (ZERO writes, ZERO session generation)
   fastify.get(
     '/qr/:code',
+    {
+      config: {
+        rateLimit: {
+          max: qrGetMax,
+          timeWindow: '1 minute',
+        },
+      },
+    },
     async (
       request: FastifyRequest<{ Params: { code: string } }>,
       reply: FastifyReply
@@ -63,7 +89,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
         return reply.status(400).send({
           error: {
             code: ErrorCodes.CAMPAIGN_INACTIVE,
-            message: 'This campaign is paused or inactive',
+            message: 'This review campaign is currently inactive.',
           },
         });
       }
@@ -79,7 +105,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
         return reply.status(400).send({
           error: {
             code: ErrorCodes.CAMPAIGN_INACTIVE,
-            message: 'This business location is currently inactive',
+            message: 'This review campaign is currently inactive.',
           },
         });
       }
@@ -88,7 +114,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
         return reply.status(400).send({
           error: {
             code: ErrorCodes.SERVICE_UNAVAILABLE,
-            message: 'Google Review URL is not configured for this location',
+            message: 'This review service is currently unavailable.',
           },
         });
       }
@@ -104,7 +130,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
         return reply.status(403).send({
           error: {
             code: ErrorCodes.TENANT_SUSPENDED,
-            message: 'This business is currently suspended',
+            message: 'This service is currently unavailable.',
           },
         });
       }
@@ -145,6 +171,14 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
   // 2. Explicit Ephemeral Customer Session Creation
   fastify.post(
     '/qr/:code/sessions',
+    {
+      config: {
+        rateLimit: {
+          max: sessionsPostMax,
+          timeWindow: '1 minute',
+        },
+      },
+    },
     async (
       request: FastifyRequest<{ Params: { code: string } }>,
       reply: FastifyReply
@@ -219,7 +253,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
           return {
             errorStatus: 403,
             errorCode: ErrorCodes.TENANT_SUSPENDED,
-            message: 'This business is currently suspended',
+            message: 'This service is currently unavailable.',
           };
         }
 
@@ -228,14 +262,14 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
           return {
             errorStatus: 400,
             errorCode: ErrorCodes.CAMPAIGN_INACTIVE,
-            message: 'This location is currently inactive',
+            message: 'This review campaign is currently inactive.',
           };
         }
         if (!loc.googleReviewUrl || loc.googleReviewUrl.trim() === '') {
           return {
             errorStatus: 400,
             errorCode: ErrorCodes.SERVICE_UNAVAILABLE,
-            message: 'Google Review URL not configured',
+            message: 'This review service is currently unavailable.',
           };
         }
 
@@ -244,7 +278,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
           return {
             errorStatus: 400,
             errorCode: ErrorCodes.CAMPAIGN_INACTIVE,
-            message: 'This campaign is inactive or revoked',
+            message: 'This review campaign is currently inactive.',
           };
         }
 
@@ -293,6 +327,15 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
   // 3. Isolated Private Customer Feedback Submission
   fastify.post(
     '/qr/:code/feedback',
+    {
+      bodyLimit: 16384, // 16 KB payload ceiling protects against payload stuffing / memory exhaustion
+      config: {
+        rateLimit: {
+          max: feedbackPostMax,
+          timeWindow: '1 minute',
+        },
+      },
+    },
     async (
       request: FastifyRequest<{ Params: { code: string } }>,
       reply: FastifyReply
@@ -383,7 +426,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
           return {
             errorStatus: 403,
             errorCode: ErrorCodes.TENANT_SUSPENDED,
-            message: 'This business is currently suspended',
+            message: 'This service is currently unavailable.',
           };
         }
 
@@ -392,7 +435,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
           return {
             errorStatus: 400,
             errorCode: ErrorCodes.CAMPAIGN_INACTIVE,
-            message: 'This location is currently inactive',
+            message: 'This review campaign is currently inactive.',
           };
         }
 
@@ -402,7 +445,7 @@ export const publicRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
           return {
             errorStatus: 400,
             errorCode: ErrorCodes.CAMPAIGN_INACTIVE,
-            message: 'This campaign is inactive or has been revoked',
+            message: 'This review campaign is currently inactive.',
           };
         }
 

@@ -10,9 +10,19 @@ import { ErrorCodes } from '@review-system/shared';
  */
 export function validatePublicOrigin(request: FastifyRequest, reply: FastifyReply): boolean {
   const env = getEnv();
-  const originHeader = request.headers.origin || request.headers.referer;
+  const origin = request.headers.origin;
+  const referer = request.headers.referer;
 
-  if (!originHeader) {
+  let targetUrl: string;
+
+  if (origin) {
+    // If Origin is present, validate Origin strictly. Referer must NEVER override a mismatched Origin.
+    targetUrl = Array.isArray(origin) ? origin[0] : origin;
+  } else if (referer) {
+    // Only use Referer when Origin is absent
+    targetUrl = Array.isArray(referer) ? referer[0] : referer;
+  } else {
+    // Both are absent
     reply.status(403).send({
       error: {
         code: ErrorCodes.FORBIDDEN,
@@ -23,8 +33,7 @@ export function validatePublicOrigin(request: FastifyRequest, reply: FastifyRepl
   }
 
   try {
-    const rawHeader = Array.isArray(originHeader) ? originHeader[0] : originHeader;
-    const requestOrigin = new URL(rawHeader).origin;
+    const requestOrigin = new URL(targetUrl).origin;
     const canonicalOrigin = new URL(env.PUBLIC_WEB_URL).origin;
 
     if (requestOrigin === canonicalOrigin) {
@@ -45,7 +54,7 @@ export function validatePublicOrigin(request: FastifyRequest, reply: FastifyRepl
     reply.status(403).send({
       error: {
         code: ErrorCodes.FORBIDDEN,
-        message: 'Untrusted Origin or Referer header',
+        message: origin ? 'Untrusted Origin header' : 'Untrusted Referer header',
       },
     });
     return false;

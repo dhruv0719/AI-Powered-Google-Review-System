@@ -86,8 +86,15 @@ const authPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       request.cookies[AuthConstants.COOKIE_NAME] &&
       ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
     ) {
-      const originHeader = request.headers.origin || request.headers.referer;
-      if (!originHeader) {
+      const origin = request.headers.origin;
+      const referer = request.headers.referer;
+      let originHeader: string;
+
+      if (origin) {
+        originHeader = Array.isArray(origin) ? origin[0] : origin;
+      } else if (referer) {
+        originHeader = Array.isArray(referer) ? referer[0] : referer;
+      } else {
         reply.status(403).send({
           error: {
             code: ErrorCodes.FORBIDDEN,
