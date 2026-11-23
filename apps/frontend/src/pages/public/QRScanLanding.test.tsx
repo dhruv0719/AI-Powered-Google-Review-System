@@ -402,7 +402,7 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
     });
 
     let cta = screen.getByTestId('google-review-cta');
-    expect(cta.style.color).toBe('rgb(17, 24, 39)'); // #111827 (dark text for light background)
+    expect(cta.style.color).toBe('rgb(0, 0, 0)'); // #000000 (mathematically guaranteed contrast >= 4.5:1)
 
     unmount();
 

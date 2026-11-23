@@ -246,10 +246,18 @@ export function PrivateFeedbackForm({
             return (
               <label
                 key={star}
+                htmlFor={`rating-star-${star}`}
                 data-testid={`star-label-${star}`}
                 className="star-radio-item touch-press"
                 onMouseEnter={() => setHoverRating(star)}
                 onMouseLeave={() => setHoverRating(null)}
+                onClick={(e) => {
+                  // If the user taps the label or star glyph directly, and this star is already selected,
+                  // ensure session refresh is triggered (since native radio change won't fire)
+                  if ((e.target as HTMLElement).tagName !== 'INPUT' && rating === star) {
+                    handleRatingClick(star);
+                  }
+                }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -263,6 +271,7 @@ export function PrivateFeedbackForm({
               >
                 <input
                   type="radio"
+                  id={`rating-star-${star}`}
                   name="rating"
                   value={star}
                   checked={rating === star}

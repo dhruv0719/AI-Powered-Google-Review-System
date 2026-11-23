@@ -398,7 +398,7 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
     const submitBtn = screen.getByRole('button', { name: /submit private feedback/i });
     expect(submitBtn).not.toBeDisabled();
     expect(submitBtn.style.backgroundColor).toBe('rgb(16, 185, 129)'); // #10B981
-    expect(submitBtn.style.color).toBe('rgb(17, 24, 39)'); // #111827 (dark text for light background)
+    expect(submitBtn.style.color).toBe('rgb(0, 0, 0)'); // #000000 (guaranteed contrast >= 4.5:1)
 
     unmount();
 
@@ -411,5 +411,88 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
     expect(submitBtnDark).not.toBeDisabled();
     expect(submitBtnDark.style.backgroundColor).toBe('rgb(37, 99, 235)'); // #2563EB
     expect(submitBtnDark.style.color).toBe('rgb(255, 255, 255)'); // #ffffff (white text for dark background)
+  });
+
+  it('17. should recover from INVALID_SESSION when user re-clicks the already-selected star label directly', async () => {
+    const sessionSpy = vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+      expiresAt: new Date().toISOString(),
+    });
+
+    const submitSpy = vi
+      .spyOn(publicApi, 'submitPublicFeedback')
+      .mockRejectedValueOnce(new PublicApiError('Expired', 401, ErrorCodes.INVALID_SESSION))
+      .mockResolvedValueOnce({ success: true, feedbackId: 'fb_recovered_label', message: 'Ok' });
+
+    render(<PrivateFeedbackForm {...defaultProps} />);
+
+    // Select star 5 via label
+    fireEvent.click(screen.getByTestId('star-label-5'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+
+    const submitBtn = screen.getByRole('button', { name: /submit private feedback/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText('Your session has expired. Please select your rating again to refresh.')
+    ).toBeInTheDocument();
+
+    // Re-click the visible star label for star 5 (already checked)
+    fireEvent.click(screen.getByTestId('star-label-5'));
+
+    await waitFor(() => {
+      expect(sessionSpy).toHaveBeenCalledTimes(2); // fresh session established!
+    });
+
+    // Re-submit
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('feedback-success')).toBeInTheDocument();
+    });
+
+    expect(submitSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('18. should recover from INVALID_SESSION when user changes to a different star rating', async () => {
+    const sessionSpy = vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+      expiresAt: new Date().toISOString(),
+    });
+
+    const submitSpy = vi
+      .spyOn(publicApi, 'submitPublicFeedback')
+      .mockRejectedValueOnce(new PublicApiError('Expired', 401, ErrorCodes.INVALID_SESSION))
+      .mockResolvedValueOnce({ success: true, feedbackId: 'fb_recovered_diff_star', message: 'Ok' });
+
+    render(<PrivateFeedbackForm {...defaultProps} />);
+
+    fireEvent.click(screen.getByTestId('star-5'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+
+    const submitBtn = screen.getByRole('button', { name: /submit private feedback/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    // Switch to star 4
+    fireEvent.click(screen.getByTestId('star-4'));
+
+    await waitFor(() => {
+      expect(sessionSpy).toHaveBeenCalledTimes(2);
+    });
+
+    // Re-submit
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('feedback-success')).toBeInTheDocument();
+    });
+
+    expect(submitSpy).toHaveBeenCalledTimes(2);
   });
 });
