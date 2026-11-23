@@ -184,29 +184,50 @@
 ---
 
 ### 3.2 Tenant & Location Management
+
+#### Path-Based Authorization Policy
+- **Tenant Target Selection**: The `:tenantId` parameter in the request path explicitly selects the target tenant.
+- **Authorization Requirement**: Valid membership with `role === Roles.OWNER` in that target tenant is strictly required for all `/owner/*` operations.
+- **Active Tenant Context**: `activeTenantId` on the session cookie is the default UI and session selection context, not an additional authorization barrier. A user belonging to multiple tenants can explicitly operate on any tenant they belong to as owner by specifying `:tenantId` in the path.
+- **Non-Disclosing Rejection**: Any request targeting a tenant where the user has no membership receives a non-disclosing `404 TENANT_NOT_FOUND` (preventing tenant enumeration).
+- **Suspension Handling**: Accessing a suspended tenant returns `403 TENANT_SUSPENDED` without revoking the session or access to other tenants.
+- **Non-Owner Rejection**: Any request targeting an owner endpoint by a tenant member without `Roles.OWNER` receives `403 FORBIDDEN`.
+
 - `GET /api/v1/owner/tenants`: List all tenants the user is a member of.
 - `GET /api/v1/owner/tenants/:tenantId`: Get tenant configuration and active subscription.
 - `POST /api/v1/owner/tenants`: Create an additional tenant. Atomically creates tenant, subscription, and assigns creator as owner.
 - `POST /api/v1/owner/tenants/:tenantId/switch`: Switch active tenant context. Validates user membership in the target tenant before updating `active_tenant_id` on the session.
 - `PATCH /api/v1/owner/tenants/:tenantId`:
-  - Body: `{ display_name, logo_url, brand_color }`.
-  - Permission: Tenant `owner` or `manager`.
-- `GET /api/v1/owner/tenants/:tenantId/locations`: List physical locations.
+  - Body: `{ displayName }`.
+  - Permission: Tenant `owner`.
+- `GET /api/v1/owner/tenants/:tenantId/locations`: List physical locations (`?status=all|active|inactive`).
 - `POST /api/v1/owner/tenants/:tenantId/locations`:
-  - Body: `{ name, address, google_review_url }`.
-  - Validation: Validates URL against approved Google Review URL patterns.
-- `PATCH /api/v1/owner/tenants/:tenantId/locations/:locId`: Update location details or review URL.
+  - Body: `{ name, address?, city?, state?, postalCode?, phone?, googleReviewUrl?, isPrimary? }`.
+  - Concurrency: Acquires exclusive row lock on tenant (`SELECT id FROM tenants WHERE id = :tenantId FOR UPDATE`).
+  - Validation: Validates URL against approved Google Review URL patterns (HTTPS, zero-fetch allowlist).
+  - Primary logic: If 0 active locations, forced to `isPrimary = true`. If `isPrimary: true`, atomically demotes previous primary.
+- `GET /api/v1/owner/tenants/:tenantId/locations/:locationId`: Get location details.
+- `PATCH /api/v1/owner/tenants/:tenantId/locations/:locationId`:
+  - Body: `{ name?, address?, city?, state?, postalCode?, phone?, googleReviewUrl?, isPrimary?, isActive?, newPrimaryLocationId? }`.
+  - Concurrency: Acquires exclusive row lock on tenant (`SELECT id FROM tenants WHERE id = :tenantId FOR UPDATE`).
+  - Primary invariants:
+    - Rejects promotion of an inactive location.
+    - Rejects unsetting primary without replacement.
+    - If deactivating the sole active location: returns `400 CANNOT_DEACTIVATE_ONLY_LOCATION`.
+    - If deactivating a primary location when other active locations exist: requires valid `newPrimaryLocationId` in payload.
+  - Deactivation: Soft-deactivation via `{ isActive: false }` (no DELETE endpoint).
 
 ---
 
 ### 3.3 Service Management
-- `GET /api/v1/owner/tenants/:tenantId/services`: List services.
-- `POST /api/v1/owner/tenants/:tenantId/services`:
-  - Body: `{ name, location_id, display_order }`.
-- `PATCH /api/v1/owner/tenants/:tenantId/services/:serviceId`:
-  - Body: `{ name, is_active, display_order }`.
-- `DELETE /api/v1/owner/tenants/:tenantId/services/:serviceId`:
-  - Soft-deactivates the service (`is_active = false`) to preserve audit trail.
+- `GET /api/v1/owner/tenants/:tenantId/locations/:locationId/services`: List services for a location (`?status=all|active|inactive`).
+- `POST /api/v1/owner/tenants/:tenantId/locations/:locationId/services`:
+  - Body: `{ name, description?, displayOrder? }`.
+  - Database Integrity: Verified via composite foreign key `(tenant_id, location_id) -> locations(tenant_id, id)`.
+- `GET /api/v1/owner/tenants/:tenantId/locations/:locationId/services/:serviceId`: Get single service.
+- `PATCH /api/v1/owner/tenants/:tenantId/locations/:locationId/services/:serviceId`:
+  - Body: `{ name?, description?, displayOrder?, isActive? }`.
+  - Deactivation: Soft-deactivation via `{ isActive: false }` (no DELETE endpoint).
 
 ---
 

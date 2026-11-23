@@ -148,6 +148,60 @@ The database follows a strict **Tenant-Centric** relational model.
 
 ---
 
+### 2.6 `locations` (Physical Business Locations)
+**Purpose**: Stores physical business branches belonging to a tenant.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | PK, `defaultRandom()` | Unique location identifier |
+| `tenant_id` | `UUID` | NOT NULL, FK $\rightarrow$ `tenants.id` ON DELETE CASCADE | Associated tenant |
+| `name` | `VARCHAR(150)` | NOT NULL | Branch name (e.g. "Main Workshop") |
+| `address` | `VARCHAR(255)` | NULLABLE | Physical street address |
+| `city` | `VARCHAR(100)` | NULLABLE | City / Municipality |
+| `state` | `VARCHAR(100)` | NULLABLE | State / Province |
+| `postal_code` | `VARCHAR(20)` | NULLABLE | PIN / Postal code |
+| `phone` | `VARCHAR(30)` | NULLABLE | Contact telephone |
+| `google_review_url` | `VARCHAR(1024)` | NULLABLE | Validated Google Review destination URL |
+| `is_primary` | `BOOLEAN` | NOT NULL, DEFAULT `false` | True if primary location |
+| `is_active` | `BOOLEAN` | NOT NULL, DEFAULT `true` | Soft deactivation status |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `now()` | Created timestamp |
+| `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `now()` | Updated timestamp |
+
+- **Integrity & Constraints**:
+  - `CONSTRAINT unique_tenant_location UNIQUE (tenant_id, id)`: Serves as composite foreign key target for `services`.
+  - `CREATE UNIQUE INDEX unique_tenant_primary_location ON locations(tenant_id) WHERE (is_primary = true);`: Database-level guarantee of at-most-one primary location per tenant.
+  - `CHECK (is_primary = false OR is_active = true)`: An inactive location can never be primary.
+  - `INDEX idx_locations_tenant ON locations(tenant_id)`: Fast tenant queries.
+  - **Concurrency Serialization**: All primary-location lifecycle operations serialize by acquiring an exclusive row lock on the parent tenant record:
+    `SELECT id FROM tenants WHERE id = :tenantId FOR UPDATE;`
+    This serializes concurrent location creation, primary switching, and deactivation.
+
+---
+
+### 2.7 `services` (Location-Scoped Service Catalogue)
+**Purpose**: Stores services provided at a physical location.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | PK, `defaultRandom()` | Unique service identifier |
+| `tenant_id` | `UUID` | NOT NULL | Associated tenant business |
+| `location_id` | `UUID` | NOT NULL | Associated physical location |
+| `name` | `VARCHAR(100)` | NOT NULL | Service title (e.g. "Oil Change") |
+| `description` | `VARCHAR(255)` | NULLABLE | Optional brief description |
+| `display_order` | `INTEGER` | NOT NULL, DEFAULT `0` | Order for UI display |
+| `is_active` | `BOOLEAN` | NOT NULL, DEFAULT `true` | Soft deactivation status |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `now()` | Created timestamp |
+| `updated_at` | `TIMESTAMPTZ` | NOT NULL, DEFAULT `now()` | Updated timestamp |
+
+- **Integrity & Constraints**:
+  - **Composite Foreign Key**:
+    `FOREIGN KEY (tenant_id, location_id) REFERENCES locations(tenant_id, id) ON DELETE CASCADE`
+    *Guarantees at the database level that a service can never be associated with a location from another tenant.*
+  - `INDEX idx_services_location ON services(location_id)`: Fast retrieval of location services.
+  - `INDEX idx_services_tenant ON services(tenant_id)`: Tenant isolation index.
+
+---
+
 ## 3. Database Testing Strategy & Limitations
 
 ### 3.1 PGlite in Integration Tests
@@ -160,7 +214,8 @@ The database follows a strict **Tenant-Centric** relational model.
   - The database adapter is designed to be **100% interchangeable**:
     - When `DATABASE_URL` is set, Drizzle uses standard `postgres` (or `pg`) driver connecting to real PostgreSQL.
     - When `DATABASE_URL` is omitted in test environments, it falls back to `pglite`.
-    - Staging and production deployments must run automated migrations and smoke tests against a real PostgreSQL instance.
+  - **Deployment Concurrency Testing Requirement**:
+    - Before production deployment, automated multi-threaded concurrency suites must run against a real PostgreSQL instance to test simultaneous creation, primary switching, and primary deactivation contention.
 
 ### 3.2 Migration Strategy
 - Drizzle Kit manages versioned SQL migrations in `apps/backend/drizzle/migrations/`.

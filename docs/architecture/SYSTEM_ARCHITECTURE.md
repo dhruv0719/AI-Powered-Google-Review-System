@@ -90,6 +90,9 @@ Collapse `organizations` and `businesses` into a single entity: **`tenants`**.
 - One subscribed business = one `tenant`.
 - Billing and subscriptions attach directly to the `tenant`.
 - Users belong to tenants via `tenant_memberships` (with roles: `owner`, `manager`, `staff`).
+- **Path-Based Multi-Tenant Authorization**: All authenticated merchant operations explicitly specify `:tenantId` in the route path. Access is granted if the authenticated user holds an active membership with `Roles.OWNER` for that specific tenant.
+- **Session Active Tenant Context**: `active_tenant_id` on the session cookie represents the user's active UI workspace selection context, not an additional security boundary. A multi-tenant user can explicitly query or manage any tenant they own via path parameter without switching active session state.
+- **Non-Disclosing Rejection**: Any request targeting a tenant where the user has no membership returns a non-disclosing `404 TENANT_NOT_FOUND`.
 - Each tenant owns one or more `locations`. For the MVP, a default primary location is automatically provisioned.
 - Services and QR campaigns attach to `locations` (with inheritance from `tenants`).
 
@@ -101,7 +104,7 @@ Collapse `organizations` and `businesses` into a single entity: **`tenants`**.
 A location level exists even for single-location businesses. Auto-creating a "Primary Location" during onboarding completely abstracts this complexity while preserving future scalability.
 
 #### 5. How We Will Test It
-Automated integration tests verifying that users with memberships in multiple tenants only see data for their active tenant context (`active_tenant_id`), and tenant boundary enforcement tests blocking cross-tenant object manipulation.
+Automated integration tests verifying path-based multi-tenant authorization, non-owner role rejection (`403 FORBIDDEN`), non-disclosing 404 rejection for non-members, and tenant boundary enforcement tests blocking cross-tenant object manipulation.
 
 ---
 
