@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestApp } from './setup.js';
 import { FastifyInstance } from 'fastify';
 import { ErrorCodes, AuthConstants } from '@review-system/shared';
-import { tenants } from '../src/drizzle/schema.js';
-import { eq } from 'drizzle-orm';
+import { tenants, tenantMemberships, sessions } from '../src/drizzle/schema.js';
+import { eq, and } from 'drizzle-orm';
 
 describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
   let app: FastifyInstance;
@@ -38,6 +38,7 @@ describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/owner/tenants',
+      headers: { origin: 'http://localhost' },
       cookies: { [AuthConstants.COOKIE_NAME]: userA.cookie },
       payload: {
         displayName: 'Shop A Secondary Branch',
@@ -59,6 +60,7 @@ describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
     await app.inject({
       method: 'POST',
       url: '/api/v1/owner/tenants',
+      headers: { origin: 'http://localhost' },
       cookies: { [AuthConstants.COOKIE_NAME]: userA.cookie },
       payload: {
         displayName: 'Tenant Beta',
@@ -90,6 +92,7 @@ describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
     const switchRes = await app.inject({
       method: 'POST',
       url: `/api/v1/owner/tenants/${tenantBId}/switch`,
+      headers: { origin: 'http://localhost' },
       cookies: { [AuthConstants.COOKIE_NAME]: userA.cookie },
     });
 
@@ -131,6 +134,7 @@ describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
     const secondTenantRes = await app.inject({
       method: 'POST',
       url: '/api/v1/owner/tenants',
+      headers: { origin: 'http://localhost' },
       cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
       payload: {
         displayName: 'Tenant To Be Suspended',
@@ -142,6 +146,7 @@ describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
     await app.inject({
       method: 'POST',
       url: `/api/v1/owner/tenants/${suspendedTenantId}/switch`,
+      headers: { origin: 'http://localhost' },
       cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
     });
 
@@ -165,6 +170,7 @@ describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
     const switchBackRes = await app.inject({
       method: 'POST',
       url: `/api/v1/owner/tenants/${goodTenantId}/switch`,
+      headers: { origin: 'http://localhost' },
       cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
     });
     expect(switchBackRes.statusCode).toBe(200);
@@ -177,5 +183,121 @@ describe('Tenant Isolation & Multi-Tenancy Integration Tests', () => {
     });
     expect(goodAccess.statusCode).toBe(200);
     expect(goodAccess.json().displayName).toBe('Tenant Good');
+  });
+
+  // Multi-Tenant Switching: 1 user, 3 tenants, switching across all three
+  it('should support 1 user with 3 tenants, switching between all 3 seamlessly', async () => {
+    const user = await registerUser('three_tenants@test.com', 'Tenant 1');
+    const tenant1Id = user.body.activeTenant.id;
+
+    // Create Tenant 2
+    const t2Res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/owner/tenants',
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+      payload: { displayName: 'Tenant 2' },
+    });
+    const tenant2Id = t2Res.json().id;
+
+    // Create Tenant 3
+    const t3Res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/owner/tenants',
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+      payload: { displayName: 'Tenant 3' },
+    });
+    const tenant3Id = t3Res.json().id;
+
+    // List all 3 tenants
+    const listRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/owner/tenants',
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json().tenants.length).toBe(3);
+
+    // Switch to Tenant 2
+    const switchTo2 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/owner/tenants/${tenant2Id}/switch`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(switchTo2.statusCode).toBe(200);
+    expect(switchTo2.json().activeTenant.displayName).toBe('Tenant 2');
+
+    // Verify GET /me reflects Tenant 2
+    const me2 = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(me2.json().activeTenant.id).toBe(tenant2Id);
+
+    // Switch to Tenant 3
+    const switchTo3 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/owner/tenants/${tenant3Id}/switch`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(switchTo3.statusCode).toBe(200);
+    expect(switchTo3.json().activeTenant.displayName).toBe('Tenant 3');
+
+    // Switch back to Tenant 1
+    const switchTo1 = await app.inject({
+      method: 'POST',
+      url: `/api/v1/owner/tenants/${tenant1Id}/switch`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(switchTo1.statusCode).toBe(200);
+    expect(switchTo1.json().activeTenant.displayName).toBe('Tenant 1');
+  });
+
+  // Membership Deletion / Cascade: Deleting tenant_memberships row cascades to sessions
+  it('should cascade session deletion when membership row is deleted via composite foreign key', async () => {
+    const user = await registerUser('cascade_test@test.com', 'Cascade Tenant');
+    const tenantId = user.body.activeTenant.id;
+    const userId = user.body.user.id;
+
+    // Verify session exists in DB
+    const [existingSession] = await db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.userId, userId), eq(sessions.activeTenantId, tenantId)));
+    expect(existingSession).toBeDefined();
+
+    // Verify authenticated request works
+    const check1 = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(check1.statusCode).toBe(200);
+
+    // Delete membership row in database
+    await db
+      .delete(tenantMemberships)
+      .where(and(eq(tenantMemberships.userId, userId), eq(tenantMemberships.tenantId, tenantId)));
+
+    // Verify composite foreign key CASCADE deleted the session row
+    const [cascadedSession] = await db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.userId, userId), eq(sessions.activeTenantId, tenantId)));
+    expect(cascadedSession).toBeUndefined();
+
+    // Verify subsequent request with that session cookie is immediately rejected with 401 UNAUTHORIZED
+    const check2 = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      cookies: { [AuthConstants.COOKIE_NAME]: user.cookie },
+    });
+    expect(check2.statusCode).toBe(401);
+    expect(check2.json().error.code).toBe(ErrorCodes.UNAUTHORIZED);
   });
 });

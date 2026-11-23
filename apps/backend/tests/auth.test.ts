@@ -233,6 +233,7 @@ describe('Authentication & Session Integration Tests', () => {
     const logoutRes = await app.inject({
       method: 'POST',
       url: '/api/v1/auth/logout',
+      headers: { origin: 'http://localhost' },
       cookies: { [AuthConstants.COOKIE_NAME]: cookie.value },
     });
     expect(logoutRes.statusCode).toBe(200);
