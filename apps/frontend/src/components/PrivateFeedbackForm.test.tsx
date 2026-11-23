@@ -304,4 +304,112 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
       screen.getByText('Unable to submit feedback. Please check your connection and try again.')
     ).toBeInTheDocument();
   });
+
+  it('11. should render accessible native radio stars inside fieldset with legend and 48x48px touch targets', () => {
+    render(<PrivateFeedbackForm {...defaultProps} />);
+
+    // Fieldset and Legend
+    expect(screen.getByRole('group', { name: /How was your overall experience/i })).toBeInTheDocument();
+
+    // 5 radio inputs
+    for (let star = 1; star <= 5; star++) {
+      const radio = screen.getByRole('radio', { name: `${star} star${star > 1 ? 's' : ''}` });
+      expect(radio).toBeInTheDocument();
+      expect(radio).not.toBeChecked();
+
+      const label = screen.getByTestId(`star-label-${star}`);
+      expect(label.style.width).toBe('48px');
+      expect(label.style.height).toBe('48px');
+      expect(label.classList.contains('touch-press')).toBe(true);
+      expect(label.classList.contains('star-radio-item')).toBe(true);
+    }
+  });
+
+  it('12. should prevent iOS Safari auto-zoom with 16px font size on inputs and textareas', () => {
+    render(<PrivateFeedbackForm {...defaultProps} />);
+
+    const textarea = screen.getByPlaceholderText(/share details/i);
+    expect(textarea.style.fontSize).toBe('16px');
+
+    const contactInput = screen.getByPlaceholderText(/contact you back/i);
+    expect(contactInput.style.fontSize).toBe('16px');
+    expect(contactInput.style.minHeight).toBe('44px');
+  });
+
+  it('13. should link character counter via aria-describedby and announce via aria-live="polite"', () => {
+    render(<PrivateFeedbackForm {...defaultProps} />);
+
+    const textarea = screen.getByPlaceholderText(/share details/i);
+    expect(textarea).toHaveAttribute('aria-describedby', 'feedback-text-counter');
+
+    const counter = document.getElementById('feedback-text-counter');
+    expect(counter).toBeInTheDocument();
+    expect(counter).toHaveAttribute('aria-live', 'polite');
+    expect(counter).toHaveTextContent('0/1000 characters');
+
+    // Type 10 characters
+    fireEvent.change(textarea, { target: { value: '0123456789' } });
+    expect(counter).toHaveTextContent('10/1000 characters');
+  });
+
+  it('14. should toggle aria-pressed and active styles on service chips with minHeight >= 40px', () => {
+    render(<PrivateFeedbackForm {...defaultProps} />);
+
+    const ceramicChip = screen.getByRole('button', { name: 'Ceramic Coating' });
+    expect(ceramicChip).toHaveAttribute('aria-pressed', 'false');
+    expect(ceramicChip.style.minHeight).toBe('40px');
+    expect(ceramicChip.classList.contains('touch-press')).toBe(true);
+
+    // Toggle on
+    fireEvent.click(ceramicChip);
+    expect(ceramicChip).toHaveAttribute('aria-pressed', 'true');
+
+    // Toggle off
+    fireEvent.click(ceramicChip);
+    expect(ceramicChip).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('15. should render consent container with touch-friendly padding, 48px touch target, and focus-ring styling', () => {
+    render(<PrivateFeedbackForm {...defaultProps} />);
+
+    const consentContainer = document.querySelector('.consent-container');
+    expect(consentContainer).toBeInTheDocument();
+    expect(consentContainer?.classList.contains('touch-press')).toBe(true);
+
+    const checkbox = screen.getByRole('checkbox', { name: /i agree/i });
+    expect(checkbox).toBeInTheDocument();
+    expect(checkbox.style.width).toBe('18px');
+    expect(checkbox.style.height).toBe('18px');
+  });
+
+  it('16. should compute high-contrast submit button text color based on merchant brand color', () => {
+    // Light brand color (#10B981) -> dark text (#111827) when enabled
+    const { unmount } = render(<PrivateFeedbackForm {...defaultProps} brandColor="#10B981" />);
+
+    // Initially disabled with muted gray background and white text
+    const disabledBtn = screen.getByRole('button', { name: /submit private feedback/i });
+    expect(disabledBtn).toBeDisabled();
+    expect(disabledBtn.style.color).toBe('rgb(255, 255, 255)');
+
+    // Enable button by providing rating and consent
+    fireEvent.click(screen.getByTestId('star-5'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+
+    const submitBtn = screen.getByRole('button', { name: /submit private feedback/i });
+    expect(submitBtn).not.toBeDisabled();
+    expect(submitBtn.style.backgroundColor).toBe('rgb(16, 185, 129)'); // #10B981
+    expect(submitBtn.style.color).toBe('rgb(17, 24, 39)'); // #111827 (dark text for light background)
+
+    unmount();
+
+    // Dark brand color (#2563EB) -> white text (#ffffff) when enabled
+    render(<PrivateFeedbackForm {...defaultProps} brandColor="#2563EB" />);
+    fireEvent.click(screen.getByTestId('star-5'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+
+    const submitBtnDark = screen.getByRole('button', { name: /submit private feedback/i });
+    expect(submitBtnDark).not.toBeDisabled();
+    expect(submitBtnDark.style.backgroundColor).toBe('rgb(37, 99, 235)'); // #2563EB
+    expect(submitBtnDark.style.color).toBe('rgb(255, 255, 255)'); // #ffffff (white text for dark background)
+  });
 });

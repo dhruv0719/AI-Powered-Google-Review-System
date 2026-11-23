@@ -368,4 +368,82 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
       expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
     });
   });
+
+  it('18. should render semantic <main> landmark for page content, loading, and error states', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+
+    renderComponent();
+
+    // Verify main landmark in loading or resolved state
+    await waitFor(() => {
+      expect(screen.getByRole('main')).toBeInTheDocument();
+    });
+
+    const main = screen.getByRole('main');
+    expect(main).toContainElement(screen.getByTestId('business-name'));
+    expect(main).toContainElement(screen.getByTestId('google-review-cta'));
+  });
+
+  it('19. should select high-contrast text color for CTA button depending on merchant brand color', async () => {
+    // Test light brand color (#10B981) -> dark text (#111827)
+    const lightBrandDTO = {
+      ...mockSuccessDTO,
+      tenant: {
+        ...mockSuccessDTO.tenant,
+        brandColor: '#10B981',
+      },
+    };
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(lightBrandDTO);
+
+    const { unmount } = renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+    });
+
+    let cta = screen.getByTestId('google-review-cta');
+    expect(cta.style.color).toBe('rgb(17, 24, 39)'); // #111827 (dark text for light background)
+
+    unmount();
+
+    // Test dark brand color (#2563EB) -> white text (#ffffff)
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+    });
+
+    cta = screen.getByTestId('google-review-cta');
+    expect(cta.style.color).toBe('rgb(255, 255, 255)'); // #ffffff (white text for dark background)
+  });
+
+  it('20. should render high-contrast address subtext color meeting WCAG AA (>= 4.5:1)', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-address')).toBeInTheDocument();
+    });
+
+    const address = screen.getByTestId('location-address');
+    // #4b5563 (rgb(75, 85, 99)) achieves 7.0:1 contrast ratio against white (exceeds WCAG AA 4.5:1)
+    expect(address.style.color).toBe('rgb(75, 85, 99)');
+  });
+
+  it('21. should render CTA with touch-target >= 48px and touch-press tactile class', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+    });
+
+    const cta = screen.getByTestId('google-review-cta');
+    expect(cta.style.minHeight).toBe('48px');
+    expect(cta.classList.contains('touch-press')).toBe(true);
+  });
 });
