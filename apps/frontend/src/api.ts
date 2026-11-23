@@ -4,12 +4,11 @@ import {
   TenantDTO,
   UserDTO,
   CampaignDTO,
-  PublicQRResolutionDTO,
-  PublicSessionResponseDTO,
   PrivateFeedbackDTO,
   FeedbackListResponseDTO,
   CreatePrivateFeedbackInput,
 } from '@review-system/shared';
+import { publicApi } from './services/publicApi.js';
 
 const API_BASE = '/api/v1';
 
@@ -179,17 +178,9 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
-  // Public QR Journey
-  resolvePublicCampaign: (code: string) =>
-    request<PublicQRResolutionDTO>(`/public/qr/${code}`),
-  createPublicSession: (code: string) =>
-    request<PublicSessionResponseDTO>(`/public/qr/${code}/sessions`, { method: 'POST' }),
+  // Public QR Journey (delegated to dedicated publicApi service)
+  resolvePublicCampaign: (code: string) => publicApi.resolvePublicCampaign(code),
+  createPublicSession: (code: string) => publicApi.createPublicSession(code),
   submitPublicFeedback: (code: string, data: CreatePrivateFeedbackInput) =>
-    request<{ success: boolean; feedbackId: string; message: string }>(
-      `/public/qr/${code}/feedback`,
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }
-    ),
+    publicApi.submitPublicFeedback(code, data),
 };
