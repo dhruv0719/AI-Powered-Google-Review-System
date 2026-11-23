@@ -41,6 +41,11 @@ export const tenants = pgTable(
 );
 
 // 3. Tenant Memberships
+// Single canonical unique constraint on (user_id, tenant_id) enforces:
+// 1. A user cannot be added to the same tenant more than once.
+// 2. Backs the composite foreign key from sessions(user_id, active_tenant_id).
+// 3. Automatically provides a B-tree index on user_id as the leading column.
+// An index on tenant_id optimizes member lookups by tenant.
 export const tenantMemberships = pgTable(
   'tenant_memberships',
   {
@@ -55,9 +60,7 @@ export const tenantMemberships = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    unique('unique_tenant_user').on(table.tenantId, table.userId),
     unique('unique_user_tenant').on(table.userId, table.tenantId),
-    index('idx_memberships_user').on(table.userId),
     index('idx_memberships_tenant').on(table.tenantId),
   ]
 );

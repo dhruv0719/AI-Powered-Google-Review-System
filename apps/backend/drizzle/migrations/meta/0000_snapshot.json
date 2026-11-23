@@ -1,5 +1,5 @@
 {
-  "id": "d5ef2058-9474-44d4-b4b6-cde3e92d35a1",
+  "id": "2a848cf6-2e47-45d3-b9f2-fe160e42f694",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -242,21 +242,6 @@
         }
       },
       "indexes": {
-        "idx_memberships_user": {
-          "name": "idx_memberships_user",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_memberships_tenant": {
           "name": "idx_memberships_tenant",
           "columns": [
@@ -303,14 +288,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "unique_tenant_user": {
-          "name": "unique_tenant_user",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "user_id"
-          ]
-        },
         "unique_user_tenant": {
           "name": "unique_user_tenant",
           "nullsNotDistinct": false,
