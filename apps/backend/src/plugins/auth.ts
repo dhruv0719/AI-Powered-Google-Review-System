@@ -37,15 +37,7 @@ declare module 'fastify' {
 const authPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   // Hook to parse and validate session on every request
   fastify.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
-    let rawToken = request.cookies[AuthConstants.COOKIE_NAME];
-
-    // Fallback: Check Authorization header
-    if (!rawToken && request.headers.authorization) {
-      const parts = request.headers.authorization.split(' ');
-      if (parts.length === 2 && parts[0]?.toLowerCase() === 'bearer') {
-        rawToken = parts[1];
-      }
-    }
+    const rawToken = request.cookies[AuthConstants.COOKIE_NAME];
 
     if (!rawToken) {
       return;
