@@ -169,9 +169,9 @@
 
 ### 3.1 Authentication & Session Endpoints
 - `POST /api/v1/auth/register`:
-  - Body: `{ email, password, full_name, business_name, google_review_url }`.
+  - Body: `{ email, password, full_name, business_name }`.
   - Security: `is_platform_admin` is explicitly disallowed and stripped.
-  - Behavior: Creates `users`, `tenants`, `locations`, `subscriptions`, and `tenant_memberships` in a single transaction. Sets HTTP-only session cookie.
+  - Behavior: Atomically creates `users`, `tenants`, `tenant_memberships` (as owner), and minimal `subscriptions` in a single transaction. (Locations deferred to Milestone 2). Sets HTTP-only session cookie.
 - `POST /api/v1/auth/login`:
   - Body: `{ email, password }`.
   - Rate Limit: 5 failed attempts / 15 minutes per IP.
@@ -186,6 +186,8 @@
 ### 3.2 Tenant & Location Management
 - `GET /api/v1/owner/tenants`: List all tenants the user is a member of.
 - `GET /api/v1/owner/tenants/:tenantId`: Get tenant configuration and active subscription.
+- `POST /api/v1/owner/tenants`: Create an additional tenant. Atomically creates tenant, subscription, and assigns creator as owner.
+- `POST /api/v1/owner/tenants/:tenantId/switch`: Switch active tenant context. Validates user membership in the target tenant before updating `active_tenant_id` on the session.
 - `PATCH /api/v1/owner/tenants/:tenantId`:
   - Body: `{ display_name, logo_url, brand_color }`.
   - Permission: Tenant `owner` or `manager`.

@@ -196,9 +196,12 @@ The system serves two distinct user personas with fundamentally different lifecy
 #### 2. Chosen Approach
 Implement two dedicated, isolated tables:
 1. **`sessions` (Authenticated Owner Sessions)**:
-   - Stores SHA-256 hash of opaque 256-bit session token.
-   - Tracks `user_id`, `active_tenant_id`, `ip_address`, `user_agent`, `expires_at` (7 days).
-   - **Revocation**: Deleting the row revokes access immediately. Suspending a tenant or user immediately invalidates active sessions.
+   - Primary key is `token_hash` (SHA-256 hash of opaque 256-bit session token).
+   - Tracks `user_id`, `active_tenant_id`, and `expires_at` (7 days).
+   - **Data Minimization**: `ip_address` and `user_agent` are omitted.
+   - **Composite Foreign Key**: `(user_id, active_tenant_id) REFERENCES tenant_memberships(user_id, tenant_id) ON DELETE CASCADE`. Prevents a session from selecting any tenant the user does not belong to.
+   - **Revocation**: Deleting the row revokes access immediately on logout.
+   - **Tenant Suspension**: Suspending a tenant blocks access to that specific tenant without invalidating the user's sessions or access to other tenants.
    - **Cleanup**: Daily automated purge of rows where `expires_at < NOW()`.
 2. **`ephemeral_sessions` (Anonymous Customer Sessions)**:
    - Stores SHA-256 hash of client session token issued upon QR scan.
