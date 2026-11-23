@@ -1,0 +1,35 @@
+{
+  "name": "@review-system/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/drizzle/migrate.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^10.0.1",
+    "@fastify/cors": "^10.0.1",
+    "@fastify/helmet": "^12.0.1",
+    "@fastify/rate-limit": "^10.1.1",
+    "@review-system/shared": "*",
+    "argon2": "^0.41.1",
+    "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.45.4",
+    "fastify": "^5.2.0",
+    "pino": "^9.6.0",
+    "postgres": "^3.4.5",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.14",
+    "@types/node": "^22.10.2",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^5.1.1"
+  }
+}

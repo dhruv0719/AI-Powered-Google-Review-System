@@ -1,0 +1,205 @@
+import { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import fp from 'fastify-plugin';
+import { eq, and, gt } from 'drizzle-orm';
+import { getDb } from '../db/index.js';
+import { sessions, users, tenants, tenantMemberships } from '../drizzle/schema.js';
+import { hashSessionToken } from '../utils/crypto.js';
+import { AuthConstants, ErrorCodes, Role, TenantStatus } from '@review-system/shared';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    user?: {
+      id: string;
+      email: string;
+      fullName: string;
+      isPlatformAdmin: boolean;
+      createdAt: Date;
+    };
+    session?: {
+      tokenHash: string;
+      activeTenantId: string;
+      expiresAt: Date;
+    };
+    activeTenant?: {
+      id: string;
+      slug: string;
+      displayName: string;
+      status: TenantStatus;
+      brandColor: string | null;
+      logoUrl: string | null;
+    };
+    membership?: {
+      role: Role;
+    };
+  }
+}
+
+const authPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
+  // Hook to parse and validate session on every request
+  fastify.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
+    let rawToken = request.cookies[AuthConstants.COOKIE_NAME];
+
+    // Fallback: Check Authorization header
+    if (!rawToken && request.headers.authorization) {
+      const parts = request.headers.authorization.split(' ');
+      if (parts.length === 2 && parts[0]?.toLowerCase() === 'bearer') {
+        rawToken = parts[1];
+      }
+    }
+
+    if (!rawToken) {
+      return;
+    }
+
+    const tokenHash = hashSessionToken(rawToken);
+    const db = getDb();
+    const now = new Date();
+
+    // Query session with user, tenant, and membership in one join query
+    const rows = await db
+      .select({
+        session: sessions,
+        user: users,
+        tenant: tenants,
+        membership: tenantMemberships,
+      })
+      .from(sessions)
+      .innerJoin(users, eq(sessions.userId, users.id))
+      .innerJoin(tenants, eq(sessions.activeTenantId, tenants.id))
+      .innerJoin(
+        tenantMemberships,
+        and(
+          eq(tenantMemberships.userId, sessions.userId),
+          eq(tenantMemberships.tenantId, sessions.activeTenantId)
+        )
+      )
+      .where(eq(sessions.tokenHash, tokenHash))
+      .limit(1);
+
+    const found = rows[0];
+
+    if (!found) {
+      return;
+    }
+
+    // Check expiration
+    if (found.session.expiresAt <= now) {
+      await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+      reply.clearCookie(AuthConstants.COOKIE_NAME, { path: '/' });
+      return;
+    }
+
+    // CSRF Protection on state-changing requests using cookie
+    if (
+      request.cookies[AuthConstants.COOKIE_NAME] &&
+      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
+    ) {
+      const origin = request.headers.origin || request.headers.referer;
+      const host = request.headers.host;
+      if (origin && host) {
+        try {
+          const originHost = new URL(origin).host;
+          if (originHost !== host) {
+            reply.status(403).send({
+              error: {
+                code: ErrorCodes.FORBIDDEN,
+                message: 'Cross-Site Request Forgery blocked',
+              },
+            });
+            return;
+          }
+        } catch {
+          // Malformed origin
+          reply.status(403).send({
+            error: {
+              code: ErrorCodes.FORBIDDEN,
+              message: 'Invalid origin header',
+            },
+          });
+          return;
+        }
+      }
+    }
+
+    request.user = {
+      id: found.user.id,
+      email: found.user.email,
+      fullName: found.user.fullName,
+      isPlatformAdmin: found.user.isPlatformAdmin,
+      createdAt: found.user.createdAt,
+    };
+
+    request.session = {
+      tokenHash: found.session.tokenHash,
+      activeTenantId: found.session.activeTenantId,
+      expiresAt: found.session.expiresAt,
+    };
+
+    request.activeTenant = {
+      id: found.tenant.id,
+      slug: found.tenant.slug,
+      displayName: found.tenant.displayName,
+      status: found.tenant.status as TenantStatus,
+      brandColor: found.tenant.brandColor,
+      logoUrl: found.tenant.logoUrl,
+    };
+
+    request.membership = {
+      role: found.membership.role as Role,
+    };
+  });
+};
+
+export const requireAuth = async (request: FastifyRequest, reply: FastifyReply) => {
+  if (!request.user || !request.session) {
+    reply.status(401).send({
+      error: {
+        code: ErrorCodes.UNAUTHORIZED,
+        message: 'Authentication required',
+      },
+    });
+  }
+};
+
+export const requireActiveTenant = async (request: FastifyRequest, reply: FastifyReply) => {
+  await requireAuth(request, reply);
+  if (reply.sent) return;
+
+  if (!request.activeTenant) {
+    reply.status(403).send({
+      error: {
+        code: ErrorCodes.FORBIDDEN,
+        message: 'No active tenant selected',
+      },
+    });
+    return;
+  }
+
+  // Tenant suspension rule: Blocks access to this tenant without invalidating the user session
+  if (request.activeTenant.status === 'suspended') {
+    reply.status(403).send({
+      error: {
+        code: ErrorCodes.TENANT_SUSPENDED,
+        message: 'This business account is currently suspended. Please contact support.',
+      },
+    });
+  }
+};
+
+export const requireRole = (allowedRoles: Role[]) => {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireActiveTenant(request, reply);
+    if (reply.sent) return;
+
+    if (!request.membership || !allowedRoles.includes(request.membership.role)) {
+      reply.status(403).send({
+        error: {
+          code: ErrorCodes.FORBIDDEN,
+          message: 'Insufficient permissions for this action',
+        },
+      });
+    }
+  };
+};
+
+export default fp(authPlugin);
