@@ -5,14 +5,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as schema from '../src/drizzle/schema.js';
 import { setTestDb } from '../src/db/index.js';
-import { buildServer } from '../src/server.js';
+import { buildServer, BuildServerOptions } from '../src/server.js';
 import { FastifyInstance } from 'fastify';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const migrationsFolder = path.resolve(__dirname, '../drizzle/migrations');
 
-export async function createTestApp(): Promise<{ app: FastifyInstance; db: ReturnType<typeof drizzle> }> {
+export async function createTestApp(options?: BuildServerOptions): Promise<{ app: FastifyInstance; db: ReturnType<typeof drizzle> }> {
   process.env.NODE_ENV = 'test';
   process.env.SESSION_SECRET = 'test-secret-at-least-32-characters-long-1234!';
 
@@ -25,7 +25,7 @@ export async function createTestApp(): Promise<{ app: FastifyInstance; db: Retur
 
   setTestDb(db as any);
 
-  const app = buildServer();
+  const app = buildServer(options);
   await app.ready();
 
   return { app, db };

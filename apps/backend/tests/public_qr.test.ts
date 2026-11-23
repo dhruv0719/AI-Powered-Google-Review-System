@@ -209,4 +209,48 @@ describe('Public QR Resolution & Explicit Session Issuance Integration Tests', (
     const dbSessionsAfter = await db.select().from(ephemeralSessions);
     expect(dbSessionsAfter).toHaveLength(1);
   });
+
+  it('6. should reject request with 403 when Origin is mismatched even if Referer is canonical (Referer never overrides mismatched Origin)', async () => {
+    const { campaign } = await setupActiveCampaign();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/public/qr/${campaign.code}/sessions`,
+      headers: {
+        origin: 'https://evil-spoofed-attacker.com',
+        referer: 'http://localhost:5173/legitimate-page',
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe(ErrorCodes.FORBIDDEN);
+  });
+
+  it('7. should reject feedback submissions exceeding 16KB body limit with 413 Payload Too Large', async () => {
+    const { campaign } = await setupActiveCampaign();
+
+    // Issue session
+    const sessRes = await app.inject({
+      method: 'POST',
+      url: `/api/v1/public/qr/${campaign.code}/sessions`,
+      headers: { origin: 'http://localhost:5173' },
+    });
+    const cookie = sessRes.cookies.find((c) => c.name === CustomerSessionConstants.COOKIE_NAME)!.value;
+
+    // Huge payload > 16KB
+    const hugePadding = 'A'.repeat(20 * 1024); // 20KB
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/public/qr/${campaign.code}/feedback`,
+      headers: { origin: 'http://localhost:5173' },
+      cookies: { [CustomerSessionConstants.COOKIE_NAME]: cookie },
+      payload: {
+        rating: 5,
+        feedbackText: hugePadding,
+        consentGiven: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(413);
+  });
 });

@@ -352,4 +352,37 @@ describe('Private Customer Feedback & Inbox Integration Tests', () => {
     expect(patchRes3.statusCode).toBe(400);
     expect(patchRes3.json().error.code).toBe(ErrorCodes.INVALID_STATUS_TRANSITION);
   });
+
+  it('8. should reject feedback submission when session was issued for a different campaign code', async () => {
+    const { tenantId, locationId, campaign, ownerCookie } = await setupCampaignWithServices();
+
+    // Create second campaign
+    const camp2Res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/owner/tenants/${tenantId}/locations/${locationId}/campaigns`,
+      headers: { origin: 'http://localhost' },
+      cookies: { [AuthConstants.COOKIE_NAME]: ownerCookie },
+      payload: { name: 'Second Stand' },
+    });
+    const campaign2 = camp2Res.json();
+
+    // Issue session under campaign 1
+    const sessionToken1 = await issueCustomerSession(campaign.code);
+
+    // Attempt to submit feedback to campaign 2 using campaign 1's session
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/public/qr/${campaign2.code}/feedback`,
+      headers: { origin: 'http://localhost:5173' },
+      cookies: { [CustomerSessionConstants.COOKIE_NAME]: sessionToken1 },
+      payload: {
+        rating: 5,
+        feedbackText: 'Cross-campaign submission test',
+        consentGiven: true,
+      },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe(ErrorCodes.INVALID_SESSION);
+  });
 });

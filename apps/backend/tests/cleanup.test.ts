@@ -7,6 +7,8 @@ import {
   qrCampaigns,
   ephemeralSessions,
   privateFeedback,
+  services,
+  privateFeedbackServices,
 } from '../src/drizzle/schema.js';
 import { sql, eq } from 'drizzle-orm';
 import { generateSessionToken, hashSessionToken } from '../src/utils/crypto.js';
@@ -203,5 +205,349 @@ describe('Data Retention & Background Cleanup Integration Tests', () => {
     // Verify fFresh retains customerContact
     const [reloadedFresh] = await db.select().from(privateFeedback).where(eq(privateFeedback.id, fFresh.id));
     expect(reloadedFresh.customerContact).toBe('fresh_customer@example.com');
+  });
+
+  it('3. should purge private feedback and its corresponding submitted session older than 365 days while preserving younger feedback', async () => {
+    const { tenant, location, campaign } = await seedBaseData();
+
+    // 1. Very old feedback (370 days ago) with submitted session
+    const oldToken = generateSessionToken();
+    const [oldSess] = await db
+      .insert(ephemeralSessions)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        tokenHash: hashSessionToken(oldToken),
+        issuedCode: campaign.code,
+        expiresAt: new Date(Date.now() - 370 * 86400 * 1000),
+        feedbackSubmittedAt: new Date(Date.now() - 370 * 86400 * 1000),
+      })
+      .returning();
+
+    const [oldFb] = await db
+      .insert(privateFeedback)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        sessionId: oldSess.id,
+        rating: 4,
+        feedbackText: 'Ancient feedback 370 days old',
+        consentGiven: true,
+        createdAt: new Date(Date.now() - 370 * 86400 * 1000),
+      })
+      .returning();
+
+    // 2. Moderately old feedback (100 days ago) - older than 30d contact purge, but younger than 365d
+    const midToken = generateSessionToken();
+    const [midSess] = await db
+      .insert(ephemeralSessions)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        tokenHash: hashSessionToken(midToken),
+        issuedCode: campaign.code,
+        expiresAt: new Date(Date.now() - 100 * 86400 * 1000),
+        feedbackSubmittedAt: new Date(Date.now() - 100 * 86400 * 1000),
+      })
+      .returning();
+
+    const [midFb] = await db
+      .insert(privateFeedback)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        sessionId: midSess.id,
+        rating: 5,
+        feedbackText: 'Feedback from 100 days ago should remain',
+        consentGiven: true,
+        createdAt: new Date(Date.now() - 100 * 86400 * 1000),
+      })
+      .returning();
+
+    // Execute cleanup
+    const result = await runCleanupNow(db);
+    expect(result.purgedFeedback).toBe(1);
+
+    // Verify ancient feedback is deleted
+    const [reloadedOldFb] = await db
+      .select()
+      .from(privateFeedback)
+      .where(eq(privateFeedback.id, oldFb.id));
+    expect(reloadedOldFb).toBeUndefined();
+
+    // Verify ancient session is deleted
+    const [reloadedOldSess] = await db
+      .select()
+      .from(ephemeralSessions)
+      .where(eq(ephemeralSessions.id, oldSess.id));
+    expect(reloadedOldSess).toBeUndefined();
+
+    // Verify 100-day feedback is PRESERVED
+    const [reloadedMidFb] = await db
+      .select()
+      .from(privateFeedback)
+      .where(eq(privateFeedback.id, midFb.id));
+    expect(reloadedMidFb).toBeDefined();
+    expect(reloadedMidFb.feedbackText).toBe('Feedback from 100 days ago should remain');
+
+    // Verify 100-day session is PRESERVED
+    const [reloadedMidSess] = await db
+      .select()
+      .from(ephemeralSessions)
+      .where(eq(ephemeralSessions.id, midSess.id));
+    expect(reloadedMidSess).toBeDefined();
+  });
+
+  it('4. should precisely respect the 365-day boundary (preserve 364d 23h, purge 365d 1h)', async () => {
+    const { tenant, location, campaign } = await seedBaseData();
+
+    // 1. Boundary: 364 days 23 hours ago (NOT yet 365 days) -> Must be kept
+    const tokenNear = generateSessionToken();
+    const [sessNear] = await db
+      .insert(ephemeralSessions)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        tokenHash: hashSessionToken(tokenNear),
+        issuedCode: campaign.code,
+        expiresAt: new Date(Date.now() - (364 * 86400 + 23 * 3600) * 1000),
+        feedbackSubmittedAt: new Date(Date.now() - (364 * 86400 + 23 * 3600) * 1000),
+      })
+      .returning();
+
+    const [fbNear] = await db
+      .insert(privateFeedback)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        sessionId: sessNear.id,
+        rating: 5,
+        feedbackText: '364d 23h old feedback',
+        consentGiven: true,
+        createdAt: new Date(Date.now() - (364 * 86400 + 23 * 3600) * 1000),
+      })
+      .returning();
+
+    // 2. Boundary: 365 days 1 hour ago (EXCEEDS 365 days) -> Must be purged
+    const tokenPast = generateSessionToken();
+    const [sessPast] = await db
+      .insert(ephemeralSessions)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        tokenHash: hashSessionToken(tokenPast),
+        issuedCode: campaign.code,
+        expiresAt: new Date(Date.now() - (365 * 86400 + 3600) * 1000),
+        feedbackSubmittedAt: new Date(Date.now() - (365 * 86400 + 3600) * 1000),
+      })
+      .returning();
+
+    const [fbPast] = await db
+      .insert(privateFeedback)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        sessionId: sessPast.id,
+        rating: 3,
+        feedbackText: '365d 1h old feedback',
+        consentGiven: true,
+        createdAt: new Date(Date.now() - (365 * 86400 + 3600) * 1000),
+      })
+      .returning();
+
+    const result = await runCleanupNow(db);
+    expect(result.purgedFeedback).toBe(1);
+
+    // fbNear must exist
+    const [foundNear] = await db.select().from(privateFeedback).where(eq(privateFeedback.id, fbNear.id));
+    expect(foundNear).toBeDefined();
+    const [foundSessNear] = await db.select().from(ephemeralSessions).where(eq(ephemeralSessions.id, sessNear.id));
+    expect(foundSessNear).toBeDefined();
+
+    // fbPast must be gone
+    const [foundPast] = await db.select().from(privateFeedback).where(eq(privateFeedback.id, fbPast.id));
+    expect(foundPast).toBeUndefined();
+    const [foundSessPast] = await db.select().from(ephemeralSessions).where(eq(ephemeralSessions.id, sessPast.id));
+    expect(foundSessPast).toBeUndefined();
+  });
+
+  it('5. should purge associations in private_feedback_services and preserve referential integrity', async () => {
+    const { tenant, location, campaign } = await seedBaseData();
+
+    // Insert service
+    const [svc] = await db
+      .insert(services)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        name: 'Oil Change',
+        isActive: true,
+      })
+      .returning();
+
+    // Insert session > 365d
+    const token = generateSessionToken();
+    const [sess] = await db
+      .insert(ephemeralSessions)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        tokenHash: hashSessionToken(token),
+        issuedCode: campaign.code,
+        expiresAt: new Date(Date.now() - 366 * 86400 * 1000),
+        feedbackSubmittedAt: new Date(Date.now() - 366 * 86400 * 1000),
+      })
+      .returning();
+
+    // Insert feedback > 365d
+    const [fb] = await db
+      .insert(privateFeedback)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        sessionId: sess.id,
+        rating: 2,
+        feedbackText: 'Slow service 366 days ago',
+        consentGiven: true,
+        createdAt: new Date(Date.now() - 366 * 86400 * 1000),
+      })
+      .returning();
+
+    // Insert service association
+    await db.insert(privateFeedbackServices).values({
+      feedbackId: fb.id,
+      serviceId: svc.id,
+      tenantId: tenant.id,
+      locationId: location.id,
+      serviceNameSnapshot: 'Oil Change',
+    });
+
+    const result = await runCleanupNow(db);
+    expect(result.purgedFeedback).toBe(1);
+
+    // Association deleted
+    const [foundAssoc] = await db
+      .select()
+      .from(privateFeedbackServices)
+      .where(eq(privateFeedbackServices.feedbackId, fb.id));
+    expect(foundAssoc).toBeUndefined();
+
+    // Feedback deleted
+    const [foundFb] = await db.select().from(privateFeedback).where(eq(privateFeedback.id, fb.id));
+    expect(foundFb).toBeUndefined();
+
+    // Session deleted
+    const [foundSess] = await db.select().from(ephemeralSessions).where(eq(ephemeralSessions.id, sess.id));
+    expect(foundSess).toBeUndefined();
+
+    // Service itself remains intact!
+    const [foundSvc] = await db.select().from(services).where(eq(services.id, svc.id));
+    expect(foundSvc).toBeDefined();
+  });
+
+  it('6. should delete 500+ records in batches cleanly across atomic transactions', async () => {
+    const { tenant, location, campaign } = await seedBaseData();
+
+    // Create 505 expired feedback records and sessions in bulk
+    const BATCH_SIZE = 505;
+    const sessionInserts: any[] = [];
+    for (let i = 0; i < BATCH_SIZE; i++) {
+      const token = generateSessionToken();
+      sessionInserts.push({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        tokenHash: hashSessionToken(token),
+        issuedCode: campaign.code,
+        expiresAt: new Date(Date.now() - 370 * 86400 * 1000),
+        feedbackSubmittedAt: new Date(Date.now() - 370 * 86400 * 1000),
+      });
+    }
+
+    const insertedSessions = await db.insert(ephemeralSessions).values(sessionInserts).returning({ id: ephemeralSessions.id });
+
+    const feedbackInserts = insertedSessions.map((s: any, idx: number) => ({
+      tenantId: tenant.id,
+      locationId: location.id,
+      campaignId: campaign.id,
+      sessionId: s.id,
+      rating: 4,
+      feedbackText: `Bulk feedback item ${idx}`,
+      consentGiven: true,
+      createdAt: new Date(Date.now() - 370 * 86400 * 1000),
+    }));
+
+    await db.insert(privateFeedback).values(feedbackInserts);
+
+    // Run cleanup - batch processing loop should clear all 505 records (batch 1: 500, batch 2: 5)
+    const result = await runCleanupNow(db);
+    expect(result.purgedFeedback).toBe(BATCH_SIZE);
+
+    // Verify 0 remaining feedback older than 365 days
+    const remaining = await db
+      .select({ id: privateFeedback.id })
+      .from(privateFeedback)
+      .where(sql`${privateFeedback.createdAt} < NOW() - INTERVAL '365 days'`);
+    expect(remaining.length).toBe(0);
+  });
+
+  it('7. should recover gracefully after transient failure and reset isRunning guard', async () => {
+    const { tenant, location, campaign } = await seedBaseData();
+
+    const token = generateSessionToken();
+    const [sess] = await db
+      .insert(ephemeralSessions)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        tokenHash: hashSessionToken(token),
+        issuedCode: campaign.code,
+        expiresAt: new Date(Date.now() - 380 * 86400 * 1000),
+        feedbackSubmittedAt: new Date(Date.now() - 380 * 86400 * 1000),
+      })
+      .returning();
+
+    const [fb] = await db
+      .insert(privateFeedback)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        sessionId: sess.id,
+        rating: 1,
+        feedbackText: 'Error recovery test feedback',
+        consentGiven: true,
+        createdAt: new Date(Date.now() - 380 * 86400 * 1000),
+      })
+      .returning();
+
+    // Create a mock DB that throws on transaction
+    const failingDb = {
+      transaction: async () => {
+        throw new Error('Simulated transient DB connection drop');
+      },
+      execute: async () => [],
+    };
+
+    const failResult = await runCleanupNow(failingDb);
+    expect(failResult.purgedFeedback).toBe(0);
+
+    // Verify subsequent run with real DB works immediately (isRunning was properly cleared in finally)
+    const recoverResult = await runCleanupNow(db);
+    expect(recoverResult.purgedFeedback).toBe(1);
+
+    const [reloadedFb] = await db.select().from(privateFeedback).where(eq(privateFeedback.id, fb.id));
+    expect(reloadedFb).toBeUndefined();
   });
 });
