@@ -43,15 +43,59 @@ describe('contrast utility (WCAG 2.1 compliance)', () => {
     expect(getContrastingTextColor('#000000')).toBe('#ffffff');
   });
 
-  it('selects dark text (#111827) for light backgrounds to satisfy WCAG AA >= 4.5:1', () => {
+  it('selects pure black text (#000000) for light backgrounds to satisfy WCAG AA >= 4.5:1', () => {
     // Light Emerald Green #10B981
-    expect(getContrastingTextColor('#10B981')).toBe('#111827');
+    expect(getContrastingTextColor('#10B981')).toBe('#000000');
     // Light Amber #F59E0B
-    expect(getContrastingTextColor('#F59E0B')).toBe('#111827');
+    expect(getContrastingTextColor('#F59E0B')).toBe('#000000');
     // Pure White #FFFFFF
-    expect(getContrastingTextColor('#FFFFFF')).toBe('#111827');
+    expect(getContrastingTextColor('#FFFFFF')).toBe('#000000');
     // Bright Yellow #FFFF00
-    expect(getContrastingTextColor('#FFFF00')).toBe('#111827');
+    expect(getContrastingTextColor('#FFFF00')).toBe('#000000');
+  });
+
+  it('guarantees WCAG AA contrast >= 4.5:1 for worst-case mid-grays and boundary colors (#808080, #777777, #767676)', () => {
+    const boundaryColors = [
+      '#808080', // Mid-gray (luminance ~0.216) - where #111827 failed at 4.42:1
+      '#777777', // Boundary mid-gray (luminance ~0.181)
+      '#767676', // Classic WCAG boundary color (luminance ~0.178)
+      '#555555', // Dark gray
+      '#999999', // Light gray
+      '#2563EB', // Brand blue
+      '#10B981', // Brand green
+      '#F59E0B', // Brand amber
+      '#E11D48', // Brand rose
+      '#000000', // Pure black
+      '#ffffff', // Pure white
+      '#333333', // Very dark gray
+      '#cccccc', // Very light gray
+    ];
+
+    for (const bgHex of boundaryColors) {
+      const chosenColor = getContrastingTextColor(bgHex);
+      expect(['#ffffff', '#000000']).toContain(chosenColor);
+
+      const bgRgb = parseHexColor(bgHex);
+      const bgLum = getRelativeLuminance(bgRgb);
+      const chosenLum = chosenColor === '#ffffff' ? 1.0 : 0.0;
+      const ratio = getContrastRatio(bgLum, chosenLum);
+
+      // Every single color must mathematically guarantee >= 4.5:1 contrast
+      expect(ratio).toBeGreaterThanOrEqual(4.5);
+    }
+
+    // Specific assertion for #808080: contrast with #000000 is ~5.32:1
+    const grayLum = getRelativeLuminance(parseHexColor('#808080'));
+    const grayRatio = getContrastRatio(grayLum, 0.0);
+    expect(grayRatio).toBeCloseTo(5.32, 1);
+    expect(getContrastingTextColor('#808080')).toBe('#000000');
+
+    // Specific assertion for #777777: contrast with #000000 is ~4.69:1 (>= 4.5:1)
+    const gray77Lum = getRelativeLuminance(parseHexColor('#777777'));
+    const gray77Ratio = getContrastRatio(gray77Lum, 0.0);
+    expect(gray77Ratio).toBeCloseTo(4.69, 1);
+    expect(gray77Ratio).toBeGreaterThanOrEqual(4.5);
+    expect(getContrastingTextColor('#777777')).toBe('#000000');
   });
 
   it('falls back safely for null, undefined, and malformed colors', () => {

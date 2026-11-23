@@ -53,29 +53,27 @@ export function getContrastRatio(lum1: number, lum2: number): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-const LIGHT_TEXT = '#ffffff';
-const DARK_TEXT = '#111827';
-const LIGHT_LUMINANCE = 1.0; // White (#ffffff)
-const DARK_LUMINANCE = getRelativeLuminance({ r: 17, g: 24, b: 39 }); // #111827 (~0.013)
+export const LIGHT_TEXT = '#ffffff';
+export const DARK_TEXT = '#000000';
+export const LIGHT_LUMINANCE = 1.0; // White (#ffffff)
+export const DARK_LUMINANCE = 0.0; // Black (#000000)
 
 /**
- * Selects the optimal text color (#ffffff or #111827) to maximize contrast
+ * Selects the optimal text color (#ffffff or #000000) to maximize contrast
  * against the provided background brand color.
  *
- * Guarantees compliance with WCAG Level AA (at least 4.5:1 for normal text
- * or higher available contrast).
+ * Mathematically guarantees compliance with WCAG Level AA (at least 4.5:1 contrast,
+ * with theoretical worst-case boundary contrast of sqrt(21) ≈ 4.58:1)
+ * across all valid six-digit sRGB colors.
  */
 export function getContrastingTextColor(backgroundColorHex: string | null | undefined): string {
   const rgb = parseHexColor(backgroundColorHex);
   const bgLuminance = getRelativeLuminance(rgb);
 
   const whiteContrast = getContrastRatio(LIGHT_LUMINANCE, bgLuminance);
-  const darkContrast = getContrastRatio(bgLuminance, DARK_LUMINANCE);
+  const blackContrast = getContrastRatio(bgLuminance, DARK_LUMINANCE);
 
-  // Return white if it meets or exceeds 4.5:1 and is at least as good as dark,
-  // otherwise choose whichever text color yields the strictly higher contrast ratio.
-  if (whiteContrast >= 4.5 && whiteContrast >= darkContrast) {
-    return LIGHT_TEXT;
-  }
-  return darkContrast > whiteContrast ? DARK_TEXT : LIGHT_TEXT;
+  // Return whichever text color (#000000 or #ffffff) yields the strictly higher contrast ratio.
+  // In the event of an exact tie, white is preferred.
+  return blackContrast > whiteContrast ? DARK_TEXT : LIGHT_TEXT;
 }
