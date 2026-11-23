@@ -1,4 +1,15 @@
-import { LocationDTO, ServiceDTO, TenantDTO, UserDTO } from '@review-system/shared';
+import {
+  LocationDTO,
+  ServiceDTO,
+  TenantDTO,
+  UserDTO,
+  CampaignDTO,
+  PublicQRResolutionDTO,
+  PublicSessionResponseDTO,
+  PrivateFeedbackDTO,
+  FeedbackListResponseDTO,
+  CreatePrivateFeedbackInput,
+} from '@review-system/shared';
 
 const API_BASE = '/api/v1';
 
@@ -101,4 +112,84 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  // QR Campaigns
+  getCampaigns: (tenantId: string, locationId: string) =>
+    request<{ campaigns: CampaignDTO[] }>(
+      `/owner/tenants/${tenantId}/locations/${locationId}/campaigns`
+    ),
+  createCampaign: (tenantId: string, locationId: string, data: { name: string }) =>
+    request<CampaignDTO>(`/owner/tenants/${tenantId}/locations/${locationId}/campaigns`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCampaign: (
+    tenantId: string,
+    locationId: string,
+    campaignId: string,
+    data: { name?: string; status?: 'active' | 'inactive' }
+  ) =>
+    request<CampaignDTO>(
+      `/owner/tenants/${tenantId}/locations/${locationId}/campaigns/${campaignId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    ),
+  rotateCampaign: (tenantId: string, locationId: string, campaignId: string) =>
+    request<CampaignDTO>(
+      `/owner/tenants/${tenantId}/locations/${locationId}/campaigns/${campaignId}/rotate`,
+      { method: 'POST' }
+    ),
+  revokeCampaign: (tenantId: string, locationId: string, campaignId: string) =>
+    request<CampaignDTO>(
+      `/owner/tenants/${tenantId}/locations/${locationId}/campaigns/${campaignId}/revoke`,
+      { method: 'POST' }
+    ),
+  getCampaignQrSvgUrl: (tenantId: string, locationId: string, campaignId: string) =>
+    `${API_BASE}/owner/tenants/${tenantId}/locations/${locationId}/campaigns/${campaignId}/qr.svg`,
+  getCampaignQrPngUrl: (tenantId: string, locationId: string, campaignId: string, size = 512) =>
+    `${API_BASE}/owner/tenants/${tenantId}/locations/${locationId}/campaigns/${campaignId}/qr.png?size=${size}`,
+
+  // Private Feedback Inbox
+  getFeedback: (
+    tenantId: string,
+    params?: {
+      locationId?: string;
+      status?: 'new' | 'reviewed' | 'archived' | 'all';
+      page?: number;
+      limit?: number;
+    }
+  ) => {
+    const q = new URLSearchParams();
+    if (params?.locationId) q.set('locationId', params.locationId);
+    if (params?.status) q.set('status', params.status);
+    if (params?.page) q.set('page', String(params.page));
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return request<FeedbackListResponseDTO>(`/owner/tenants/${tenantId}/feedback${qs}`);
+  },
+  updateFeedbackStatus: (
+    tenantId: string,
+    feedbackId: string,
+    status: 'reviewed' | 'archived'
+  ) =>
+    request<PrivateFeedbackDTO>(`/owner/tenants/${tenantId}/feedback/${feedbackId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+
+  // Public QR Journey
+  resolvePublicCampaign: (code: string) =>
+    request<PublicQRResolutionDTO>(`/public/qr/${code}`),
+  createPublicSession: (code: string) =>
+    request<PublicSessionResponseDTO>(`/public/qr/${code}/sessions`, { method: 'POST' }),
+  submitPublicFeedback: (code: string, data: CreatePrivateFeedbackInput) =>
+    request<{ success: boolean; feedbackId: string; message: string }>(
+      `/public/qr/${code}/feedback`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    ),
 };

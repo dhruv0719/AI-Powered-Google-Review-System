@@ -5,9 +5,14 @@ import { api } from '../api.js';
 interface LocationsViewProps {
   tenantId: string;
   onSelectLocationForServices: (location: LocationDTO) => void;
+  onSelectLocationForCampaigns: (location: LocationDTO) => void;
 }
 
-export function LocationsView({ tenantId, onSelectLocationForServices }: LocationsViewProps) {
+export function LocationsView({
+  tenantId,
+  onSelectLocationForServices,
+  onSelectLocationForCampaigns,
+}: LocationsViewProps) {
   const [locations, setLocations] = useState<LocationDTO[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [loading, setLoading] = useState(true);
@@ -417,21 +422,38 @@ export function LocationsView({ tenantId, onSelectLocationForServices }: Locatio
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
-                <button
-                  onClick={() => onSelectLocationForServices(loc)}
-                  style={{
-                    padding: '6px 12px',
-                    backgroundColor: '#2563eb',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    fontWeight: 500,
-                  }}
-                >
-                  Manage Services &rarr;
-                </button>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    onClick={() => onSelectLocationForCampaigns(loc)}
+                    style={{
+                      padding: '6px 12px',
+                      backgroundColor: '#10b981',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                    }}
+                  >
+                    &#9638; QR Campaigns &rarr;
+                  </button>
+                  <button
+                    onClick={() => onSelectLocationForServices(loc)}
+                    style={{
+                      padding: '6px 12px',
+                      backgroundColor: '#2563eb',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                    }}
+                  >
+                    Manage Services &rarr;
+                  </button>
+                </div>
 
                 <div style={{ display: 'flex', gap: '6px' }}>
                   {loc.isActive && !loc.isPrimary && (
