@@ -84,3 +84,14 @@ export const CustomerSessionConstants = {
   TOKEN_LENGTH_BYTES: 16,
   TOKEN_REGEX: /^q_[A-Za-z0-9_-]{22}$/,
 } as const;
+
+export const DEFAULT_BRAND_COLOR = '#2563EB';
+export const BRAND_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
+
+export function isValidBrandColor(color: unknown): color is string {
+  return typeof color === 'string' && BRAND_COLOR_REGEX.test(color);
+}
+
+export function sanitizeBrandColor(color: unknown): string {
+  return isValidBrandColor(color) ? color : DEFAULT_BRAND_COLOR;
+}

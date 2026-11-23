@@ -82,6 +82,7 @@ export interface PublicServiceItemDTO {
 export interface PublicQRResolutionDTO {
   tenant: {
     displayName: string;
+    brandColor: string;
   };
   location: {
     name: string;
