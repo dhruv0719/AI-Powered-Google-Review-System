@@ -1,4 +1,4 @@
-import type { Role, TenantStatus } from '../constants/index.js';
+import type { Role, TenantStatus, CampaignStatus, FeedbackStatus } from '../constants/index.js';
 
 export interface UserDTO {
   id: string;
@@ -60,4 +60,69 @@ export interface ServiceDTO {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CampaignDTO {
+  id: string;
+  tenantId: string;
+  locationId: string;
+  name: string;
+  code: string;
+  publicUrl: string;
+  status: CampaignStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicServiceItemDTO {
+  id: string;
+  name: string;
+}
+
+export interface PublicQRResolutionDTO {
+  tenant: {
+    displayName: string;
+  };
+  location: {
+    name: string;
+    address: string | null;
+    city: string | null;
+    googleReviewUrl: string;
+  };
+  services: PublicServiceItemDTO[];
+}
+
+export interface PublicSessionResponseDTO {
+  expiresAt: string;
+}
+
+export interface FeedbackServiceItemDTO {
+  serviceId: string;
+  name: string;
+}
+
+export interface PrivateFeedbackDTO {
+  id: string;
+  tenantId: string;
+  locationId: string;
+  campaignId: string;
+  rating: number;
+  feedbackText: string | null;
+  customerContact: string | null;
+  consentGiven: boolean;
+  consentAt: string;
+  consentVersion: string;
+  status: FeedbackStatus;
+  services: FeedbackServiceItemDTO[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedbackListResponseDTO {
+  feedback: PrivateFeedbackDTO[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+  };
 }

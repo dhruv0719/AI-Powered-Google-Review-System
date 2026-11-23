@@ -14,6 +14,16 @@ export const ErrorCodes = {
   INVALID_PRIMARY_REPLACEMENT: 'INVALID_PRIMARY_REPLACEMENT',
   CANNOT_PROMOTE_INACTIVE_LOCATION: 'CANNOT_PROMOTE_INACTIVE_LOCATION',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+  // M3 Additions
+  CAMPAIGN_NOT_FOUND: 'CAMPAIGN_NOT_FOUND',
+  CAMPAIGN_INACTIVE: 'CAMPAIGN_INACTIVE',
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  GOOGLE_REVIEW_URL_REQUIRED: 'GOOGLE_REVIEW_URL_REQUIRED',
+  CANNOT_REMOVE_GOOGLE_URL_ACTIVE_CAMPAIGN: 'CANNOT_REMOVE_GOOGLE_URL_ACTIVE_CAMPAIGN',
+  INVALID_SERVICES: 'INVALID_SERVICES',
+  ALREADY_SUBMITTED: 'ALREADY_SUBMITTED',
+  INVALID_STATUS_TRANSITION: 'INVALID_STATUS_TRANSITION',
+  INVALID_SESSION: 'INVALID_SESSION',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -43,8 +53,33 @@ export const SubscriptionStatuses = {
 
 export type SubscriptionStatus = (typeof SubscriptionStatuses)[keyof typeof SubscriptionStatuses];
 
+export const CampaignStatuses = {
+  ACTIVE: 'active',
+  INACTIVE: 'inactive',
+  REVOKED: 'revoked',
+} as const;
+
+export type CampaignStatus = (typeof CampaignStatuses)[keyof typeof CampaignStatuses];
+
+export const FeedbackStatuses = {
+  NEW: 'new',
+  REVIEWED: 'reviewed',
+  ARCHIVED: 'archived',
+} as const;
+
+export type FeedbackStatus = (typeof FeedbackStatuses)[keyof typeof FeedbackStatuses];
+
 export const AuthConstants = {
   MIN_PASSWORD_LENGTH: 8,
   SESSION_TTL_DAYS: 7,
   COOKIE_NAME: 'review_session',
+} as const;
+
+export const CustomerSessionConstants = {
+  COOKIE_NAME: 'customer_session',
+  SESSION_TTL_MINUTES: 30,
+  SESSION_TTL_MS: 30 * 60 * 1000,
+  TOKEN_PREFIX: 'q_',
+  TOKEN_LENGTH_BYTES: 16,
+  TOKEN_REGEX: /^q_[A-Za-z0-9_-]{22}$/,
 } as const;
