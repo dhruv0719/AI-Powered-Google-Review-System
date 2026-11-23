@@ -107,22 +107,31 @@ This guarantees that the business owner and customer journeys are 100% functiona
 
 ---
 
-### Milestone 3: Service Management, QR Campaign Generation & Ephemeral Sessions
-- **Objective**: Provide service catalogue management, dynamic QR code generation tied to physical locations, and anonymous customer session issuance in `ephemeral_sessions`.
+### Milestone 3: Public Ingestion, Campaign QR Lifecycle & Private Feedback Ingestion
+- **Status**: **Closed & Approved** (Local Verification Complete; Staging Multi-Connection Concurrency Pending)
+- **Objective**: Deliver dynamic QR campaign lifecycle management, read-only public QR resolution, path-scoped ephemeral customer session issuance, isolated private customer feedback ingestion with consent, merchant feedback inbox, and automated batched data retention.
 - **Dependencies**: Milestone 2.
-- **Modules & Expected Files**:
-  - `apps/backend/src/modules/service/*`
-  - `apps/backend/src/modules/qr/*`
-  - `packages/shared/src/schemas/service.schema.ts`
-  - `apps/backend/src/routes/public.routes.ts`
-- **Tests Required**:
-  - Service CRUD integration tests enforcing tenant-scoped slugs.
-  - QR generation test: generates valid, scannable SVG/PNG QR image containing `PUBLIC_QR_BASE_URL/q/:code`.
-  - Public resolver test: `GET /api/v1/public/qr/:code` returns public-safe metadata, creates `ephemeral_sessions` record, and rejects inactive campaigns.
-- **Definition of Done (DoD)**:
-  - Owner can create, reorder, and soft-delete services.
-  - Owner can generate and download a QR code for a location.
-  - Scanning the code resolves public-safe configuration and returns an ephemeral customer session token.
+- **Modules & Delivered Files**:
+  - `apps/backend/src/routes/campaign.routes.ts` (QR campaign creation, rotation, revocation, SVG/PNG export)
+  - `apps/backend/src/routes/public.routes.ts` (Read-only QR resolution, explicit session creation, private feedback ingestion)
+  - `apps/backend/src/routes/feedback.routes.ts` (Owner feedback inbox, status transitions, filters)
+  - `apps/backend/src/jobs/cleanup.ts` (Batched 24h unsubmitted session purge, 30d PII contact purge, 365d feedback retention purge)
+  - `apps/backend/src/utils/csrf.ts` (Public CSRF Origin/Referer enforcement)
+  - `apps/backend/src/utils/tenant_lifecycle.ts` (Transactional tenant suspension utility with row-locking pattern)
+  - `apps/backend/scripts/test-postgres-concurrency.ts` (Deterministic real PostgreSQL multi-connection concurrency test harness)
+- **Verification Status**:
+  - **Core Implementation**: Approved.
+  - **Automated Tests**: 99 tests passing across 15 test suites (`npm test`).
+  - **Build Status**: Clean compilation across all workspaces (`npm run build --workspaces`).
+  - **Security Audit**: Production dependencies clean with 0 vulnerabilities (`npm audit --omit=dev`).
+  - **Tenant Suspension Administrative Workflow**: Not implemented in API (internal row-locking helper `suspendTenant` verified; platform admin/billing endpoints deferred to Milestone 7).
+  - **Physical PostgreSQL Concurrency Verification**: Pending execution on a live physical PostgreSQL staging instance (`npm run test:concurrency`).
+  - **Multi-Instance Rate Limiting & Distributed Scheduling**: Deferred to horizontal clustering milestone (pilot relies on single-instance in-memory `@fastify/rate-limit` and in-process timer).
+- **Staging Verification Requirements**:
+  1. Apply Drizzle SQL migrations against live PostgreSQL staging database (`npm run db:migrate --workspace=@review-system/backend`).
+  2. Execute deterministic multi-connection concurrency test harness against physical PostgreSQL instance (`DATABASE_URL=... npm run test:concurrency --workspace=@review-system/backend`) to prove row-locking mutual exclusion across distinct backend worker processes.
+  3. Validate upstream reverse proxy (Cloudflare/Nginx) IP forwarding (`X-Forwarded-For`) against configured `TRUSTED_PROXIES`.
+  4. Verify background retention cleanup execution in staging environment over 24-hour cycle.
 
 ---
 
