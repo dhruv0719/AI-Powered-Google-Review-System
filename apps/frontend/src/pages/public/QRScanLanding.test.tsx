@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QRScanLanding } from './QRScanLanding.js';
 import { publicApi, PublicApiError } from '../../services/publicApi.js';
+import { ErrorCodes } from '@review-system/shared';
 
 describe('QRScanLanding (M4 Customer Landing Page)', () => {
   const mockSuccessDTO = {
@@ -49,7 +50,7 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
 
   it('2. should display customer-safe error state when campaign is not found (404)', async () => {
     vi.spyOn(publicApi, 'resolvePublicCampaign').mockRejectedValue(
-      new PublicApiError('Not found', 404, 'CAMPAIGN_NOT_FOUND')
+      new PublicApiError('Not found', 404, ErrorCodes.CAMPAIGN_NOT_FOUND)
     );
 
     renderComponent();
@@ -62,11 +63,12 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
     expect(
       screen.getByText('This review link is not found or has expired.')
     ).toBeInTheDocument();
+    expect(screen.getByTestId('retry-button')).toBeInTheDocument();
   });
 
-  it('3. should display customer-safe error state when campaign is inactive (403)', async () => {
+  it('3. should display customer-safe error state when campaign is inactive (400)', async () => {
     vi.spyOn(publicApi, 'resolvePublicCampaign').mockRejectedValue(
-      new PublicApiError('Inactive', 403, 'CAMPAIGN_INACTIVE')
+      new PublicApiError('Inactive', 400, ErrorCodes.CAMPAIGN_INACTIVE)
     );
 
     renderComponent();
@@ -83,7 +85,7 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
 
   it('4. should display customer-safe error state when rate limited (429)', async () => {
     vi.spyOn(publicApi, 'resolvePublicCampaign').mockRejectedValue(
-      new PublicApiError('Rate limited', 429, 'RATE_LIMITED')
+      new PublicApiError('Rate limited', 429, ErrorCodes.RATE_LIMITED)
     );
 
     renderComponent();
@@ -198,5 +200,172 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
     expect(
       screen.queryByRole('button', { name: /submit private feedback/i })
     ).not.toBeInTheDocument();
+  });
+
+  it('10. should map SERVICE_UNAVAILABLE (400) to customer-safe message', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockRejectedValue(
+      new PublicApiError('Service unavailable', 400, ErrorCodes.SERVICE_UNAVAILABLE)
+    );
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText('This review service is currently unavailable.')
+    ).toBeInTheDocument();
+  });
+
+  it('11. should map TENANT_SUSPENDED (403) to customer-safe message', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockRejectedValue(
+      new PublicApiError('Tenant suspended', 403, ErrorCodes.TENANT_SUSPENDED)
+    );
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText('This review service is currently unavailable.')
+    ).toBeInTheDocument();
+  });
+
+  it('12. should map unexpected/raw errors to generic safe message without leaking details', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockRejectedValue(
+      new Error('SELECT * FROM secret_database_table connection refused at 10.0.0.1:5432')
+    );
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    // MUST NOT leak raw database or connection string
+    expect(screen.queryByText(/secret_database_table/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/5432/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Unable to load review page. Please check your connection and try again.')
+    ).toBeInTheDocument();
+  });
+
+  it('13. should defensively reject malformed resolution DTO and display safe error state', async () => {
+    const malformedDTO = {
+      tenant: { displayName: '', brandColor: '#2563EB' }, // empty display name
+      location: null,
+      services: [],
+    } as any;
+
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(malformedDTO);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText('This review link is invalid, expired, or inactive.')
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('google-review-cta')).not.toBeInTheDocument();
+  });
+
+  it('14. should defensively reject unsafe Google review URL (e.g. javascript:) and never render CTA', async () => {
+    const maliciousUrlDTO = {
+      ...mockSuccessDTO,
+      location: {
+        ...mockSuccessDTO.location,
+        googleReviewUrl: 'javascript:alert("pwned")',
+      },
+    };
+
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(maliciousUrlDTO);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('google-review-cta')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('This review link is invalid, expired, or inactive.')
+    ).toBeInTheDocument();
+  });
+
+  it('15. should support accessible retry action for temporary resolution failures', async () => {
+    const resolveSpy = vi
+      .spyOn(publicApi, 'resolvePublicCampaign')
+      .mockRejectedValueOnce(new PublicApiError('Rate limited', 429, ErrorCodes.RATE_LIMITED))
+      .mockResolvedValueOnce(mockSuccessDTO);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('retry-button')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Too many requests. Please try again in a few minutes.')).toBeInTheDocument();
+
+    // Click retry
+    fireEvent.click(screen.getByTestId('retry-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('business-name')).toHaveTextContent('Harsh Custom Car Accessories');
+    expect(resolveSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('16. should remain in error state with retry button if retry fails', async () => {
+    const resolveSpy = vi
+      .spyOn(publicApi, 'resolvePublicCampaign')
+      .mockRejectedValue(new PublicApiError('Unavailable', 500));
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('retry-button')).toBeInTheDocument();
+    });
+
+    // Click retry
+    fireEvent.click(screen.getByTestId('retry-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('retry-button')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText('This review link is currently unavailable. Please try again later.')
+    ).toBeInTheDocument();
+    expect(resolveSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('17. should prevent overlapping resolution requests when in-flight', async () => {
+    let resolvePromise: (val: any) => void;
+    const slowPromise = new Promise((resolve) => {
+      resolvePromise = resolve;
+    });
+
+    const resolveSpy = vi
+      .spyOn(publicApi, 'resolvePublicCampaign')
+      .mockImplementationOnce(() => slowPromise as any);
+
+    renderComponent();
+
+    // While initial resolution is in-flight, only 1 request must be initiated
+    expect(resolveSpy).toHaveBeenCalledTimes(1);
+
+    // Resolve the in-flight request
+    resolvePromise!(mockSuccessDTO);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+    });
   });
 });
