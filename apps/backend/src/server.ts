@@ -6,6 +6,8 @@ import { getEnv } from './config/env.js';
 import authPlugin from './plugins/auth.js';
 import { authRoutes } from './routes/auth.routes.js';
 import { tenantRoutes } from './routes/tenant.routes.js';
+import { locationRoutes } from './routes/location.routes.js';
+import { serviceRoutes } from './routes/service.routes.js';
 import { ErrorCodes } from '@review-system/shared';
 
 export function buildServer(): FastifyInstance {
@@ -52,6 +54,8 @@ export function buildServer(): FastifyInstance {
   // Routes
   fastify.register(authRoutes, { prefix: '/api/v1/auth' });
   fastify.register(tenantRoutes, { prefix: '/api/v1/owner/tenants' });
+  fastify.register(locationRoutes, { prefix: '/api/v1/owner/tenants' });
+  fastify.register(serviceRoutes, { prefix: '/api/v1/owner/tenants' });
 
   // Centralized Error Handler
   fastify.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {

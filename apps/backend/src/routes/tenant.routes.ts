@@ -4,12 +4,14 @@ import { getDb } from '../db/index.js';
 import { tenants, tenantMemberships, subscriptions, sessions } from '../drizzle/schema.js';
 import {
   CreateTenantSchema,
+  UpdateTenantSchema,
   ErrorCodes,
   TenantDTO,
   Role,
   TenantStatus,
 } from '@review-system/shared';
 import { requireAuth } from '../plugins/auth.js';
+import { verifyTenantOwner } from '../utils/tenant_auth.js';
 
 function generateSlug(name: string): string {
   const base = name
@@ -175,39 +177,8 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
     const db = getDb();
     const userId = request.user!.id;
 
-    const [record] = await db
-      .select({
-        membership: tenantMemberships,
-        tenant: tenants,
-      })
-      .from(tenantMemberships)
-      .innerJoin(tenants, eq(tenantMemberships.tenantId, tenants.id))
-      .where(
-        and(
-          eq(tenantMemberships.userId, userId),
-          eq(tenantMemberships.tenantId, tenantId)
-        )
-      )
-      .limit(1);
-
-    if (!record) {
-      return reply.status(404).send({
-        error: {
-          code: ErrorCodes.TENANT_NOT_FOUND,
-          message: 'Tenant not found or access denied',
-        },
-      });
-    }
-
-    // Tenant suspension check: if target tenant is suspended, notify appropriately
-    if (record.tenant.status === 'suspended') {
-      return reply.status(403).send({
-        error: {
-          code: ErrorCodes.TENANT_SUSPENDED,
-          message: 'This tenant business is suspended',
-        },
-      });
-    }
+    const record = await verifyTenantOwner(db, userId, tenantId, reply);
+    if (!record) return;
 
     const tenantDTO: TenantDTO = {
       id: record.tenant.id,
@@ -217,6 +188,51 @@ export const tenantRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
       status: record.tenant.status as TenantStatus,
       brandColor: record.tenant.brandColor,
       logoUrl: record.tenant.logoUrl,
+    };
+
+    return reply.status(200).send(tenantDTO);
+  });
+
+  // 5. Update tenant business profile (displayName)
+  fastify.patch('/:tenantId', async (request: FastifyRequest<{ Params: { tenantId: string } }>, reply: FastifyReply) => {
+    const { tenantId } = request.params;
+    const db = getDb();
+    const userId = request.user!.id;
+
+    const record = await verifyTenantOwner(db, userId, tenantId, reply);
+    if (!record) return;
+
+    const parseResult = UpdateTenantSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: {
+          code: ErrorCodes.VALIDATION_ERROR,
+          message: 'Invalid tenant update payload',
+          details: parseResult.error.issues.map((i) => ({
+            field: i.path.join('.'),
+            issue: i.message,
+          })),
+        },
+      });
+    }
+
+    const [updated] = await db
+      .update(tenants)
+      .set({
+        displayName: parseResult.data.displayName,
+        updatedAt: new Date(),
+      })
+      .where(eq(tenants.id, tenantId))
+      .returning();
+
+    const tenantDTO: TenantDTO = {
+      id: updated.id,
+      slug: updated.slug,
+      displayName: updated.displayName,
+      role: record.membership.role as Role,
+      status: updated.status as TenantStatus,
+      brandColor: updated.brandColor,
+      logoUrl: updated.logoUrl,
     };
 
     return reply.status(200).send(tenantDTO);
