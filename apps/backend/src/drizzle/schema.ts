@@ -237,12 +237,17 @@ export const privateFeedback = pgTable(
     consentAt: timestamp('consent_at', { withTimezone: true }).notNull().defaultNow(),
     consentVersion: varchar('consent_version', { length: 20 }).notNull().default('v1.0'),
     status: varchar('status', { length: 20 }).notNull().default('new'),
+    clientSubmissionId: varchar('client_submission_id', { length: 64 }),
+    payloadFingerprint: varchar('payload_fingerprint', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique('unique_session_private_feedback').on(table.sessionId),
     unique('unique_tenant_location_feedback').on(table.tenantId, table.locationId, table.id),
+    uniqueIndex('unique_campaign_client_submission_id')
+      .on(table.campaignId, table.clientSubmissionId)
+      .where(sql`${table.clientSubmissionId} IS NOT NULL`),
     check('check_feedback_rating', sql`${table.rating} >= 1 AND ${table.rating} <= 5`),
     check('check_feedback_text_length', sql`${table.feedbackText} IS NULL OR (char_length(trim(${table.feedbackText})) >= 3 AND char_length(${table.feedbackText}) <= 1000)`),
     check('check_consent_affirmative', sql`${table.consentGiven} = true`),
