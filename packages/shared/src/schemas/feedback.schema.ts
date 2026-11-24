@@ -23,6 +23,12 @@ export const CreatePrivateFeedbackSchema = z.object({
   consentGiven: z.literal(true, {
     message: 'Explicit affirmative consent is required to submit private feedback',
   }),
+  clientSubmissionId: z
+    .string()
+    .trim()
+    .min(16, { message: 'Client submission ID must be at least 16 characters' })
+    .max(64, { message: 'Client submission ID cannot exceed 64 characters' })
+    .optional(),
 });
 
 export type CreatePrivateFeedbackInput = z.infer<typeof CreatePrivateFeedbackSchema>;
