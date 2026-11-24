@@ -180,7 +180,7 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
     expect(cta.style.backgroundColor).toBe('rgb(37, 99, 235)'); // #2563EB in RGB
   });
 
-  it('9. STRICT M4/M5 BOUNDARY: should NEVER render private feedback form or CTA on M4 landing page', async () => {
+  it('9. M5 COEXISTENCE: should render both Google CTA and Private Feedback form after successful campaign resolution', async () => {
     vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
 
     renderComponent();
@@ -189,20 +189,202 @@ describe('QRScanLanding (M4 Customer Landing Page)', () => {
       expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
     });
 
-    // Zero rating stars
-    expect(screen.queryByRole('group', { name: /rating/i })).not.toBeInTheDocument();
-    expect(screen.queryByTestId('star-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('star-5')).not.toBeInTheDocument();
+    // Unconditional Google Review CTA is rendered
+    const cta = screen.getByTestId('google-review-cta');
+    expect(cta).toBeInTheDocument();
+    expect(cta).toHaveAttribute('href', 'https://g.page/r/harsh-custom-car/review');
 
-    // Zero feedback forms or textareas
-    expect(screen.queryByTestId('private-feedback-form')).not.toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: /comments/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-
-    // Zero private feedback submission buttons
+    // Private Feedback Card and Form are simultaneously rendered
+    expect(screen.getByTestId('private-feedback-card')).toBeInTheDocument();
+    expect(screen.getByTestId('private-feedback-form')).toBeInTheDocument();
+    expect(screen.getByText('Send Private Feedback to Management')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /submit private feedback/i })
-    ).not.toBeInTheDocument();
+      screen.getByText(/Your feedback is sent directly to management and will not be posted to Google/i)
+    ).toBeInTheDocument();
+  });
+
+  it('9a. POLICY INVARIANT: Google CTA is available immediately before any feedback interaction with zero rating or consent requirement', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+    });
+
+    const cta = screen.getByTestId('google-review-cta');
+    expect(cta).toBeInTheDocument();
+    expect(cta).not.toHaveAttribute('aria-disabled', 'true');
+
+    // Consent checkbox is not checked
+    const consent = screen.getByRole('checkbox', { name: /i agree/i });
+    expect(consent).not.toBeChecked();
+
+    // No star radio is checked
+    const stars = [1, 2, 3, 4, 5].map((s) => screen.getByTestId(`star-${s}`) as HTMLInputElement);
+    expect(stars.every((star) => !star.checked)).toBe(true);
+  });
+
+  it('9b. POLICY INVARIANT: Selecting 1-star does NOT gate, hide, disable, or alter Google Review CTA', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+    vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+      expiresAt: new Date().toISOString(),
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+    });
+
+    // Customer selects low rating (1 star)
+    fireEvent.click(screen.getByTestId('star-1'));
+    await waitFor(() => {
+      expect((screen.getByTestId('star-1') as HTMLInputElement).checked).toBe(true);
+    });
+
+    // Google CTA MUST remain fully visible, ungated, and functional
+    const cta = screen.getByTestId('google-review-cta');
+    expect(cta).toBeInTheDocument();
+    expect(cta).toHaveAttribute('href', 'https://g.page/r/harsh-custom-car/review');
+    expect(cta).toHaveAttribute('target', '_blank');
+    expect(cta).toHaveTextContent(/Write a Review on Google/i);
+  });
+
+  it('9c. POLICY INVARIANT: Selecting 5-star does NOT gate, hide, disable, or alter Google Review CTA or private feedback', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+    vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+      expiresAt: new Date().toISOString(),
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+    });
+
+    // Customer selects high rating (5 stars)
+    fireEvent.click(screen.getByTestId('star-5'));
+    await waitFor(() => {
+      expect((screen.getByTestId('star-5') as HTMLInputElement).checked).toBe(true);
+    });
+
+    // Both Google CTA and Private Feedback form remain in the document
+    const cta = screen.getByTestId('google-review-cta');
+    expect(cta).toBeInTheDocument();
+    expect(cta).toHaveAttribute('href', 'https://g.page/r/harsh-custom-car/review');
+    expect(screen.getByTestId('private-feedback-form')).toBeInTheDocument();
+  });
+
+  it('9d. INTEGRATION: Private feedback receives correct campaign code and resolved service information', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+
+    renderComponent('q_customCampaign999');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('private-feedback-form')).toBeInTheDocument();
+    });
+
+    // Verifies resolved services are passed and rendered as chips
+    expect(screen.getByText('Ceramic Coating')).toBeInTheDocument();
+    expect(screen.getByText('PPF Installation')).toBeInTheDocument();
+  });
+
+  it('9e. ISOLATION: Loading and campaign error states do NOT incorrectly mount the feedback form', async () => {
+    // 1. Loading state: feedback form must NOT mount
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockImplementation(
+      () => new Promise(() => {}) // pending forever
+    );
+
+    const { unmount } = renderComponent();
+    expect(screen.queryByTestId('private-feedback-form')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('google-review-cta')).not.toBeInTheDocument();
+
+    unmount();
+
+    // 2. Error state (404 Not Found): feedback form must NOT mount
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockRejectedValue(
+      new PublicApiError('Not found', 404, ErrorCodes.CAMPAIGN_NOT_FOUND)
+    );
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('private-feedback-form')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('google-review-cta')).not.toBeInTheDocument();
+  });
+
+  it('9f. END-TO-END FLOW: should complete successful private feedback submission from landing page while preserving lazy session and keeping Google CTA accessible', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValue(mockSuccessDTO);
+    const sessionSpy = vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+      expiresAt: new Date().toISOString(),
+    });
+    const submitSpy = vi.spyOn(publicApi, 'submitPublicFeedback').mockResolvedValue({
+      success: true,
+      feedbackId: 'fb_landing_integration_123',
+      message: 'Feedback received successfully',
+    });
+
+    renderComponent('q_campaignCode12345678');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+      expect(screen.getByTestId('private-feedback-form')).toBeInTheDocument();
+    });
+
+    // 1. PRESERVE LAZY SESSION: Session is NOT initiated upon page resolution
+    expect(sessionSpy).not.toHaveBeenCalled();
+
+    // 2. User interacts with star rating -> triggers lazy session
+    fireEvent.click(screen.getByTestId('star-4'));
+    await waitFor(() => {
+      expect(sessionSpy).toHaveBeenCalledWith('q_campaignCode12345678');
+    });
+
+    // 3. Select service chip
+    fireEvent.click(screen.getByText('Ceramic Coating'));
+
+    // 4. Fill optional comments and contact
+    fireEvent.change(screen.getByPlaceholderText(/share details/i), {
+      target: { value: 'Great ceramic coating service and friendly team.' },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/contact you back/i), {
+      target: { value: 'customer@example.com' },
+    });
+
+    // 5. Consent checkbox
+    fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+
+    // 6. Submit feedback
+    const submitBtn = screen.getByRole('button', { name: /submit private feedback/i });
+    expect(submitBtn).not.toBeDisabled();
+    fireEvent.click(submitBtn);
+
+    // 7. Verify submission payload dispatched to publicApi
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalledWith('q_campaignCode12345678', {
+        rating: 4,
+        serviceIds: ['srv_1'],
+        feedbackText: 'Great ceramic coating service and friendly team.',
+        customerContact: 'customer@example.com',
+        consentGiven: true,
+        clientSubmissionId: expect.any(String),
+      });
+    });
+
+    // 8. Form transitions to success confirmation
+    await waitFor(() => {
+      expect(screen.getByTestId('feedback-success')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Thank You for Your Feedback!')).toBeInTheDocument();
+
+    // 9. POLICY INVARIANT: Google CTA remains available and clickable throughout and after submission
+    const cta = screen.getByTestId('google-review-cta');
+    expect(cta).toBeInTheDocument();
+    expect(cta).toHaveAttribute('href', 'https://g.page/r/harsh-custom-car/review');
   });
 
   it('10. should map SERVICE_UNAVAILABLE (400) to customer-safe message', async () => {
