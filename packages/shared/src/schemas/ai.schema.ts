@@ -25,8 +25,7 @@ export const DraftGenerationRequestSchema = z.object({
     .trim()
     .min(2, { message: 'Language code must be at least 2 characters' })
     .max(10, { message: 'Language code cannot exceed 10 characters' })
-    .optional()
-    .default('en'),
+    .optional(),
 });
 
 export type DraftGenerationRequestInput = z.infer<typeof DraftGenerationRequestSchema>;
@@ -43,7 +42,7 @@ export const DraftGenerationResponseSchema = z.object({
   status: z.enum(['generated', 'insufficient_context']),
   draft: z.string().nullable(),
   generationsRemaining: z.number().int().min(0).max(3),
-  isReplay: z.boolean().optional(),
+  isReplay: z.boolean(),
 });
 
 export type DraftGenerationResponseDTO = z.infer<typeof DraftGenerationResponseSchema>;
