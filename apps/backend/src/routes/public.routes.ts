@@ -19,7 +19,7 @@ import {
   PublicSessionResponseDTO,
   sanitizeBrandColor,
 } from '@review-system/shared';
-import { generateSessionToken, hashSessionToken } from '../utils/crypto.js';
+import { generateSessionToken, hashSessionToken, computePayloadFingerprint } from '../utils/crypto.js';
 import { validatePublicOrigin } from '../utils/csrf.js';
 import { getEnv } from '../config/env.js';
 
@@ -401,20 +401,61 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
           };
         }
 
-        if (session.feedbackSubmittedAt) {
-          return {
-            errorStatus: 409,
-            errorCode: ErrorCodes.ALREADY_SUBMITTED,
-            message: 'Feedback has already been submitted for this session',
-          };
-        }
-
         // Verify session was issued under the matching code
         if (session.issuedCode !== code) {
           return {
             errorStatus: 401,
             errorCode: ErrorCodes.INVALID_SESSION,
             message: 'Session does not match this campaign code',
+          };
+        }
+
+        // 1. Cross-Session & Within-Session Idempotency Check by (campaignId, clientSubmissionId)
+        if (body.clientSubmissionId) {
+          const [existingFeedback] = await tx
+            .select({
+              id: privateFeedback.id,
+              campaignId: privateFeedback.campaignId,
+              clientSubmissionId: privateFeedback.clientSubmissionId,
+              payloadFingerprint: privateFeedback.payloadFingerprint,
+            })
+            .from(privateFeedback)
+            .where(
+              and(
+                eq(privateFeedback.campaignId, session.campaignId),
+                eq(privateFeedback.clientSubmissionId, body.clientSubmissionId)
+              )
+            )
+            .limit(1);
+
+          if (existingFeedback) {
+            const incomingFingerprint = computePayloadFingerprint(body);
+            if (existingFeedback.payloadFingerprint === incomingFingerprint) {
+              // Identical submission ID + identical fingerprint -> idempotent replay
+              if (!session.feedbackSubmittedAt) {
+                await tx
+                  .update(ephemeralSessions)
+                  .set({ feedbackSubmittedAt: new Date() })
+                  .where(eq(ephemeralSessions.id, session.id));
+              }
+              return { feedback: existingFeedback, isReplay: true };
+            } else {
+              // Identical submission ID + different fingerprint -> validation error
+              return {
+                errorStatus: 400,
+                errorCode: ErrorCodes.VALIDATION_ERROR,
+                message: 'Submission ID already used with different feedback parameters',
+              };
+            }
+          }
+        }
+
+        // 2. One-feedback-per-session rule: If session already submitted with a different (or missing) ID
+        if (session.feedbackSubmittedAt) {
+          return {
+            errorStatus: 409,
+            errorCode: ErrorCodes.ALREADY_SUBMITTED,
+            message: 'Feedback has already been submitted for this session',
           };
         }
 
@@ -480,7 +521,9 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
           selectedServices.push(...dbServices);
         }
 
-        // Insert into private_feedback
+        const payloadFingerprint = computePayloadFingerprint(body);
+
+        // Insert into private_feedback with onConflictDoNothing for concurrency safety
         const [newFeedback] = await tx
           .insert(privateFeedback)
           .values({
@@ -493,8 +536,57 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
             customerContact: body.customerContact || null,
             consentGiven: true,
             status: 'new',
+            clientSubmissionId: body.clientSubmissionId || null,
+            payloadFingerprint,
           })
+          .onConflictDoNothing()
           .returning();
+
+        if (!newFeedback) {
+          // A concurrent insert occurred for this campaign with the same clientSubmissionId or session
+          if (body.clientSubmissionId) {
+            const [concurrentFeedback] = await tx
+              .select({
+                id: privateFeedback.id,
+                campaignId: privateFeedback.campaignId,
+                clientSubmissionId: privateFeedback.clientSubmissionId,
+                payloadFingerprint: privateFeedback.payloadFingerprint,
+              })
+              .from(privateFeedback)
+              .where(
+                and(
+                  eq(privateFeedback.campaignId, session.campaignId),
+                  eq(privateFeedback.clientSubmissionId, body.clientSubmissionId)
+                )
+              )
+              .limit(1);
+
+            if (concurrentFeedback) {
+              const incomingFingerprint = computePayloadFingerprint(body);
+              if (concurrentFeedback.payloadFingerprint === incomingFingerprint) {
+                if (!session.feedbackSubmittedAt) {
+                  await tx
+                    .update(ephemeralSessions)
+                    .set({ feedbackSubmittedAt: new Date() })
+                    .where(eq(ephemeralSessions.id, session.id));
+                }
+                return { feedback: concurrentFeedback, isReplay: true };
+              } else {
+                return {
+                  errorStatus: 400,
+                  errorCode: ErrorCodes.VALIDATION_ERROR,
+                  message: 'Submission ID already used with different feedback parameters',
+                };
+              }
+            }
+          }
+
+          return {
+            errorStatus: 409,
+            errorCode: ErrorCodes.ALREADY_SUBMITTED,
+            message: 'Feedback has already been submitted for this session',
+          };
+        }
 
         // Insert into private_feedback_services with immutable serviceNameSnapshot
         for (const s of selectedServices) {
@@ -513,7 +605,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
           .set({ feedbackSubmittedAt: new Date() })
           .where(eq(ephemeralSessions.id, session.id));
 
-        return { feedback: newFeedback };
+        return { feedback: newFeedback, isReplay: false };
       });
 
       if (!txResult.feedback) {
@@ -522,7 +614,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
         });
       }
 
-      return reply.status(201).send({
+      return reply.status(txResult.isReplay ? 200 : 201).send({
         success: true,
         feedbackId: txResult.feedback.id,
         message: 'Thank you for your feedback!',

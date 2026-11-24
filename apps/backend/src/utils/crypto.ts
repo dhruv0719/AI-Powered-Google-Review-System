@@ -27,3 +27,19 @@ export function generateSessionToken(): string {
 export function hashSessionToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
+
+export function computePayloadFingerprint(body: {
+  rating: number;
+  serviceIds?: string[];
+  feedbackText?: string | null;
+  customerContact?: string | null;
+}): string {
+  const sortedServices = Array.from(new Set(body.serviceIds || [])).sort();
+  const canonicalObj = {
+    rating: body.rating,
+    serviceIds: sortedServices,
+    feedbackText: body.feedbackText ? body.feedbackText.trim() : null,
+    customerContact: body.customerContact ? body.customerContact.trim() : null,
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(canonicalObj)).digest('hex');
+}
