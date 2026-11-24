@@ -91,6 +91,9 @@ export interface PublicQRResolutionDTO {
     googleReviewUrl: string;
   };
   services: PublicServiceItemDTO[];
+  features?: {
+    aiAssistantEnabled: boolean;
+  };
 }
 
 export interface PublicSessionResponseDTO {
@@ -127,3 +130,10 @@ export interface FeedbackListResponseDTO {
     total: number;
   };
 }
+
+export type {
+  DraftGenerationRequestInput,
+  DraftGenerationResponseDTO,
+  DraftGenerationStatusType,
+} from '../schemas/ai.schema.js';
+
