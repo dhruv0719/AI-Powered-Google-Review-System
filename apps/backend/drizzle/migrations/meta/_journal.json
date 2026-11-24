@@ -29,6 +29,13 @@
       "when": 1795440000000,
       "tag": "0003_add_feedback_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795504928394,
+      "tag": "0004_add_ai_drafts_and_quota",
+      "breakpoints": true
     }
   ]
 }

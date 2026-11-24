@@ -209,6 +209,9 @@ export const ephemeralSessions = pgTable(
     feedbackSubmittedAt: timestamp('feedback_submitted_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    generationsRemaining: smallint('generations_remaining').notNull().default(3),
+    generationLockToken: uuid('generation_lock_token'),
+    generationLockUntil: timestamp('generation_lock_until', { withTimezone: true }),
   },
   (table) => [
     unique('unique_ephemeral_token_hash').on(table.tokenHash),
@@ -218,6 +221,7 @@ export const ephemeralSessions = pgTable(
       foreignColumns: [qrCampaigns.tenantId, qrCampaigns.locationId, qrCampaigns.id],
     }).onDelete('cascade'),
     index('idx_ephemeral_sessions_expires_at').on(table.expiresAt),
+    check('check_generations_remaining_bounds', sql`${table.generationsRemaining} >= 0 AND ${table.generationsRemaining} <= 3`),
   ]
 );
 
@@ -288,3 +292,27 @@ export const privateFeedbackServices = pgTable(
     }).onDelete('cascade'),
   ]
 );
+
+// 12. Ephemeral Session Drafts (Multi-Attempt Idempotency Cache)
+export const ephemeralSessionDrafts = pgTable(
+  'ephemeral_session_drafts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => ephemeralSessions.id, { onDelete: 'cascade' }),
+    clientDraftId: varchar('client_draft_id', { length: 64 }).notNull(),
+    payloadFingerprint: varchar('payload_fingerprint', { length: 64 }).notNull(),
+    draftText: text('draft_text').notNull(),
+    generationsRemainingAtSettlement: smallint('generations_remaining_at_settlement').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('unique_session_client_draft').on(table.sessionId, table.clientDraftId),
+    check(
+      'check_settlement_remaining_bounds',
+      sql`${table.generationsRemainingAtSettlement} >= 0 AND ${table.generationsRemainingAtSettlement} <= 2`
+    ),
+  ]
+);
+
