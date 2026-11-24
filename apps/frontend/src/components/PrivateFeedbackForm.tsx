@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { ErrorCodes } from '@review-system/shared';
+import { useState, useRef, useEffect } from 'react';
+import { ErrorCodes, CreatePrivateFeedbackInput } from '@review-system/shared';
 import { publicApi, PublicApiError } from '../services/publicApi.js';
 import { getContrastingTextColor } from '../utils/contrast.js';
 
@@ -27,6 +27,7 @@ export function PrivateFeedbackForm({
 }: PrivateFeedbackFormProps) {
   const [rating, setRating] = useState<number | null>(null);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [availableServices, setAvailableServices] = useState<ServiceItem[]>(services);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [feedbackText, setFeedbackText] = useState('');
   const [customerContact, setCustomerContact] = useState('');
@@ -35,11 +36,24 @@ export function PrivateFeedbackForm({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submissionStatus, setSubmissionStatus] = useState<
+    'idle' | 'in_flight' | 'uncertain' | 'session_expired' | 'rejected' | 'confirmed'
+  >('idle');
+
+  // Sync available services if parent services prop changes
+  useEffect(() => {
+    setAvailableServices(services);
+  }, [services]);
 
   // In-flight session creation promise ref to prevent duplicate/racing session requests
   const sessionPromiseRef = useRef<Promise<unknown> | null>(null);
   // Synchronous submission lock to prevent duplicate executions before React re-renders
   const isSubmittingRef = useRef(false);
+  // Tracks immutable snapshot of pending in-flight submission for server-verifiable idempotency
+  const pendingSubmissionRef = useRef<{ id: string; payload: CreatePrivateFeedbackInput } | null>(null);
+
+  // Form inputs are locked during in-flight submission and when outcome is uncertain
+  const isFormLocked = submitting || submissionStatus === 'uncertain';
 
   // Lazy session creation on first user interaction with concurrency deduplication
   const ensureSession = async (): Promise<boolean> => {
@@ -71,11 +85,13 @@ export function PrivateFeedbackForm({
   };
 
   const handleRatingClick = (stars: number) => {
+    if (isFormLocked) return;
     ensureSession();
     setRating(stars);
   };
 
   const toggleService = (serviceId: string) => {
+    if (isFormLocked) return;
     ensureSession();
     setSelectedServiceIds((prev) =>
       prev.includes(serviceId) ? prev.filter((id) => id !== serviceId) : [...prev, serviceId]
@@ -90,8 +106,18 @@ export function PrivateFeedbackForm({
       return;
     }
 
+    // Client-side normalization and validation (only for fresh submissions)
+    const trimmedText = feedbackText.trim();
+    const trimmedContact = customerContact.trim();
+
+    if (!pendingSubmissionRef.current && trimmedText.length > 0 && trimmedText.length < 3) {
+      setError('Feedback comments must be at least 3 characters if provided.');
+      return;
+    }
+
     isSubmittingRef.current = true;
     setSubmitting(true);
+    setSubmissionStatus('in_flight');
     setError(null);
 
     try {
@@ -102,18 +128,39 @@ export function PrivateFeedbackForm({
           setError('Unable to start feedback session. Please try again.');
           isSubmittingRef.current = false;
           setSubmitting(false);
+          setSubmissionStatus('idle');
           return;
         }
       }
 
-      await publicApi.submitPublicFeedback(code, {
-        rating,
-        serviceIds: selectedServiceIds.filter((id) => typeof id === 'string'),
-        feedbackText: feedbackText.trim() ? feedbackText.trim() : undefined,
-        customerContact: customerContact.trim() ? customerContact.trim() : undefined,
-        consentGiven: true,
-      });
+      // Check whether an unresolved/pending submission exists
+      let payloadToSubmit: CreatePrivateFeedbackInput;
+      if (pendingSubmissionRef.current) {
+        // Send exact preserved payload snapshot, service IDs, and clientSubmissionId
+        payloadToSubmit = pendingSubmissionRef.current.payload;
+      } else {
+        // Fresh logical submission: generate stable unique submission ID
+        const subId =
+          typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `sub_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
 
+        payloadToSubmit = {
+          rating,
+          serviceIds: selectedServiceIds.filter((id) => typeof id === 'string'),
+          feedbackText: trimmedText ? trimmedText : undefined,
+          customerContact: trimmedContact ? trimmedContact : undefined,
+          consentGiven: true,
+          clientSubmissionId: subId,
+        };
+        pendingSubmissionRef.current = { id: subId, payload: payloadToSubmit };
+      }
+
+      await publicApi.submitPublicFeedback(code, payloadToSubmit);
+
+      // Submission confirmed
+      pendingSubmissionRef.current = null;
+      setSubmissionStatus('confirmed');
       setSubmitted(true);
       if (onSuccess) {
         onSuccess();
@@ -121,38 +168,72 @@ export function PrivateFeedbackForm({
     } catch (err: unknown) {
       if (err instanceof PublicApiError) {
         switch (err.code) {
+          case ErrorCodes.INVALID_SERVICES: {
+            try {
+              const freshRes = await publicApi.resolvePublicCampaign(code);
+              if (freshRes && Array.isArray(freshRes.services)) {
+                setAvailableServices(freshRes.services);
+                const activeIds = new Set(freshRes.services.map((s) => s.id));
+                setSelectedServiceIds((prev) => prev.filter((id) => activeIds.has(id)));
+              }
+            } catch {
+              // Silently retain current services if resolution fails; prevents retry loop
+            }
+            setError('One or more selected services are no longer available. Available services have been refreshed; please review your selection and submit again.');
+            pendingSubmissionRef.current = null;
+            setSubmissionStatus('rejected');
+            break;
+          }
           case ErrorCodes.ALREADY_SUBMITTED:
             setError('Feedback has already been submitted for this session.');
+            pendingSubmissionRef.current = null;
+            setSubmissionStatus('rejected');
             break;
           case ErrorCodes.INVALID_SESSION:
             setError('Your session has expired. Please select your rating again to refresh.');
             sessionPromiseRef.current = null;
             setSessionInitiated(false);
+            setSubmissionStatus('session_expired');
             break;
           case ErrorCodes.RATE_LIMITED:
             setError('Too many requests. Please wait a moment and try again.');
+            pendingSubmissionRef.current = null;
+            setSubmissionStatus('rejected');
             break;
           case ErrorCodes.CAMPAIGN_INACTIVE:
             setError('This review campaign is currently inactive.');
+            pendingSubmissionRef.current = null;
+            setSubmissionStatus('rejected');
             break;
           case ErrorCodes.TENANT_SUSPENDED:
             setError('This service is currently unavailable.');
+            pendingSubmissionRef.current = null;
+            setSubmissionStatus('rejected');
             break;
           default:
             if (err.statusCode === 409) {
               setError('Feedback has already been submitted for this session.');
+              pendingSubmissionRef.current = null;
+              setSubmissionStatus('rejected');
             } else if (err.statusCode === 401) {
               setError('Your session has expired. Please select your rating again to refresh.');
               sessionPromiseRef.current = null;
               setSessionInitiated(false);
+              setSubmissionStatus('session_expired');
             } else if (err.statusCode === 429) {
               setError('Too many requests. Please wait a moment and try again.');
+              pendingSubmissionRef.current = null;
+              setSubmissionStatus('rejected');
             } else {
-              setError('Unable to submit feedback. Please try again.');
+              setError(err.message || 'Unable to submit feedback. Please try again.');
+              pendingSubmissionRef.current = null;
+              setSubmissionStatus('rejected');
             }
         }
       } else {
-        setError('Unable to submit feedback. Please check your connection and try again.');
+        // Ambiguous network failure or timeout: retain pending snapshot and lock form controls
+        setSubmissionStatus('uncertain');
+        setError('We could not confirm if your feedback reached management due to a network connection issue. Your feedback may have already been received. Tap Retry Submission to safely check and complete your submission without creating duplicates.');
       }
     } finally {
       isSubmittingRef.current = false;
@@ -216,13 +297,18 @@ export function PrivateFeedbackForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }} data-testid="private-feedback-form">
+    <form
+      onSubmit={handleSubmit}
+      aria-busy={submitting}
+      style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}
+      data-testid="private-feedback-form"
+    >
       <div>
         <h3 style={{ margin: '0 0 4px 0', fontSize: '18px', color: '#111827', fontWeight: 600 }}>
           Send Private Feedback to Management
         </h3>
         <p style={{ margin: 0, fontSize: '13px', color: '#4b5563', lineHeight: 1.4 }}>
-          Have compliments, suggestions, or concerns? Send a direct private note.
+          Have compliments, suggestions, or concerns? Send a direct private note. Your feedback is sent directly to management and will not be posted to Google.
         </p>
       </div>
 
@@ -252,6 +338,7 @@ export function PrivateFeedbackForm({
                 onMouseEnter={() => setHoverRating(star)}
                 onMouseLeave={() => setHoverRating(null)}
                 onClick={(e) => {
+                  if (isFormLocked) return;
                   // If the user taps the label or star glyph directly, and this star is already selected,
                   // ensure session refresh is triggered (since native radio change won't fire)
                   if ((e.target as HTMLElement).tagName !== 'INPUT' && rating === star) {
@@ -264,7 +351,8 @@ export function PrivateFeedbackForm({
                   justifyContent: 'center',
                   width: '48px',
                   height: '48px', // WCAG 2.5.5 touch target >= 44x44px (48px thumb standard)
-                  cursor: 'pointer',
+                  cursor: isFormLocked ? 'not-allowed' : 'pointer',
+                  opacity: isFormLocked ? 0.7 : 1,
                   userSelect: 'none',
                   borderRadius: '8px',
                 }}
@@ -274,9 +362,11 @@ export function PrivateFeedbackForm({
                   id={`rating-star-${star}`}
                   name="rating"
                   value={star}
+                  disabled={isFormLocked}
                   checked={rating === star}
-                  onChange={() => handleRatingClick(star)}
+                  onChange={() => !isFormLocked && handleRatingClick(star)}
                   onClick={() => {
+                    if (isFormLocked) return;
                     // Re-clicking the already selected star must also refresh session if needed
                     if (rating === star) {
                       handleRatingClick(star);
@@ -304,19 +394,20 @@ export function PrivateFeedbackForm({
       </fieldset>
 
       {/* Services Multi-Select Chips with >= 40px Touch Target */}
-      {services.length > 0 && (
+      {availableServices.length > 0 && (
         <div>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '8px' }}>
             Which services did you experience? (Optional)
           </label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {services.map((s) => {
+            {availableServices.map((s) => {
               const isSelected = selectedServiceIds.includes(s.id);
               return (
                 <button
                   type="button"
                   key={s.id}
-                  onClick={() => toggleService(s.id)}
+                  disabled={isFormLocked}
+                  onClick={() => !isFormLocked && toggleService(s.id)}
                   aria-pressed={isSelected}
                   className="touch-press"
                   style={{
@@ -327,7 +418,8 @@ export function PrivateFeedbackForm({
                     border: isSelected ? `2px solid ${brandColor}` : '1px solid #d1d5db',
                     backgroundColor: isSelected ? '#eff6ff' : '#fff',
                     color: isSelected ? brandColor : '#374151',
-                    cursor: 'pointer',
+                    cursor: isFormLocked ? 'not-allowed' : 'pointer',
+                    opacity: isFormLocked ? 0.7 : 1,
                     fontWeight: isSelected ? 600 : 400,
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -352,8 +444,10 @@ export function PrivateFeedbackForm({
         <textarea
           id="feedback-text"
           value={feedbackText}
+          disabled={isFormLocked}
           aria-describedby="feedback-text-counter"
           onChange={(e) => {
+            if (isFormLocked) return;
             ensureSession();
             setFeedbackText(e.target.value);
           }}
@@ -369,6 +463,8 @@ export function PrivateFeedbackForm({
             lineHeight: 1.4,
             boxSizing: 'border-box',
             fontFamily: 'inherit',
+            backgroundColor: isFormLocked ? '#f3f4f6' : '#fff',
+            cursor: isFormLocked ? 'not-allowed' : 'text',
           }}
         />
         <div
@@ -388,8 +484,10 @@ export function PrivateFeedbackForm({
         <input
           id="customer-contact"
           type="text"
+          disabled={isFormLocked}
           value={customerContact}
           onChange={(e) => {
+            if (isFormLocked) return;
             ensureSession();
             setCustomerContact(e.target.value);
           }}
@@ -403,6 +501,8 @@ export function PrivateFeedbackForm({
             borderRadius: '8px',
             fontSize: '16px', // Prevents iOS Safari viewport auto-zoom
             boxSizing: 'border-box',
+            backgroundColor: isFormLocked ? '#f3f4f6' : '#fff',
+            cursor: isFormLocked ? 'not-allowed' : 'text',
           }}
         />
       </div>
@@ -411,6 +511,7 @@ export function PrivateFeedbackForm({
       <div
         className="consent-container touch-press"
         onClick={(e) => {
+          if (isFormLocked) return;
           // If the click did not directly hit the input, toggle it
           if ((e.target as HTMLElement).tagName !== 'INPUT') {
             ensureSession();
@@ -425,15 +526,18 @@ export function PrivateFeedbackForm({
           backgroundColor: '#f9fafb',
           borderRadius: '8px',
           border: '1px solid #e5e7eb',
-          cursor: 'pointer',
+          cursor: isFormLocked ? 'not-allowed' : 'pointer',
+          opacity: isFormLocked ? 0.7 : 1,
           userSelect: 'none',
         }}
       >
         <input
           type="checkbox"
           id="consentCheckbox"
+          disabled={isFormLocked}
           checked={consentGiven}
           onChange={(e) => {
+            if (isFormLocked) return;
             ensureSession();
             setConsentGiven(e.target.checked);
           }}
@@ -441,13 +545,13 @@ export function PrivateFeedbackForm({
             marginTop: '2px',
             width: '18px',
             height: '18px',
-            cursor: 'pointer',
+            cursor: isFormLocked ? 'not-allowed' : 'pointer',
             flexShrink: 0,
           }}
         />
         <label
           htmlFor="consentCheckbox"
-          style={{ fontSize: '13px', color: '#374151', lineHeight: 1.45, cursor: 'pointer' }}
+          style={{ fontSize: '13px', color: '#374151', lineHeight: 1.45, cursor: isFormLocked ? 'not-allowed' : 'pointer' }}
         >
           <strong>I agree</strong> to submit this private feedback directly to the business owner and acknowledge that submitted information will be reviewed by management.
         </label>
@@ -456,34 +560,49 @@ export function PrivateFeedbackForm({
       {error && (
         <div
           role="alert"
+          aria-live="assertive"
           style={{ fontSize: '14px', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '10px 14px', borderRadius: '6px' }}
         >
           {error}
         </div>
       )}
 
+      {/* Screen reader polite announcement during submission */}
+      <div className="sr-only" aria-live="polite">
+        {submitting ? 'Submitting your private feedback to management...' : ''}
+      </div>
+
       {/* Submit Button with >= 48px Touch Target and High-Contrast Text */}
       <button
         type="submit"
-        disabled={submitting || !rating || !consentGiven}
+        disabled={submitting || (!pendingSubmissionRef.current && (!rating || !consentGiven))}
         className="touch-press"
         style={{
           minHeight: '48px', // Mobile touch target
           padding: '14px 20px',
-          backgroundColor: !rating || !consentGiven ? '#9ca3af' : brandColor,
-          color: !rating || !consentGiven ? '#ffffff' : submitButtonTextColor,
+          backgroundColor:
+            !rating || !consentGiven ? '#9ca3af' : brandColor,
+          color:
+            !rating || !consentGiven ? '#ffffff' : submitButtonTextColor,
           border: 'none',
           borderRadius: '8px',
           fontSize: '16px',
           fontWeight: 600,
-          cursor: !rating || !consentGiven ? 'not-allowed' : 'pointer',
+          cursor:
+            submitting || (!pendingSubmissionRef.current && (!rating || !consentGiven))
+              ? 'not-allowed'
+              : 'pointer',
           transition: 'background-color 0.2s',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        {submitting ? 'Submitting Feedback...' : 'Submit Private Feedback'}
+        {submitting
+          ? 'Submitting Feedback...'
+          : submissionStatus === 'uncertain'
+          ? 'Retry Submission'
+          : 'Submit Private Feedback'}
       </button>
     </form>
   );

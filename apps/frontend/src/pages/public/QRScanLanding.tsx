@@ -8,6 +8,7 @@ import {
 } from '@review-system/shared';
 import { publicApi, PublicApiError } from '../../services/publicApi.js';
 import { getContrastingTextColor } from '../../utils/contrast.js';
+import { PrivateFeedbackForm } from '../../components/PrivateFeedbackForm.js';
 
 export interface QRScanLandingProps {
   code?: string;
@@ -346,6 +347,26 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
         >
           Write a Review on Google &#8599;
         </a>
+      </section>
+
+      {/* 3. Direct Private Customer Feedback Section */}
+      <section
+        aria-label="Private Feedback to Management"
+        data-testid="private-feedback-card"
+        style={{
+          backgroundColor: '#fff',
+          borderRadius: '12px',
+          padding: '24px 20px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+        }}
+      >
+        <PrivateFeedbackForm
+          code={code}
+          locationName={data.location.name}
+          googleReviewUrl={data.location.googleReviewUrl}
+          services={data.services}
+          brandColor={brandColor}
+        />
       </section>
     </div>
   );
