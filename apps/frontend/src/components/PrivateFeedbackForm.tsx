@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { ErrorCodes, CreatePrivateFeedbackInput } from '@review-system/shared';
 import { publicApi, PublicApiError } from '../services/publicApi.js';
 import { getContrastingTextColor } from '../utils/contrast.js';
+import { AiDraftAssistant } from './AiDraftAssistant.js';
 
 export interface ServiceItem {
   id: string;
@@ -33,6 +34,8 @@ export function PrivateFeedbackForm({
   const [customerContact, setCustomerContact] = useState('');
   const [consentGiven, setConsentGiven] = useState(false); // MUST be false by default
   const [sessionInitiated, setSessionInitiated] = useState(false);
+  const [isAiGenerating, setIsAiGenerating] = useState(false);
+  const [hasAppliedAiDraft, setHasAppliedAiDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,12 +59,12 @@ export function PrivateFeedbackForm({
   const isFormLocked = submitting || submissionStatus === 'uncertain';
 
   // Lazy session creation on first user interaction with concurrency deduplication
-  const ensureSession = async (): Promise<boolean> => {
-    if (sessionInitiated) {
+  const ensureSession = async (forceRenew = false): Promise<boolean> => {
+    if (sessionInitiated && !forceRenew) {
       return true;
     }
 
-    if (sessionPromiseRef.current) {
+    if (sessionPromiseRef.current && !forceRenew) {
       try {
         await sessionPromiseRef.current;
         return true;
@@ -98,11 +101,35 @@ export function PrivateFeedbackForm({
     );
   };
 
+  const handleApplyDraft = (draftText: string) => {
+    setFeedbackText(draftText);
+    setHasAppliedAiDraft(true);
+  };
+
+  const handleRevertDraft = (restoredText: string) => {
+    setFeedbackText(restoredText);
+    setHasAppliedAiDraft(false);
+  };
+
+  const handleRequestSessionRenew = async (): Promise<boolean> => {
+    sessionPromiseRef.current = null;
+    setSessionInitiated(false);
+    const success = await ensureSession(true);
+    if (success) {
+      if (submissionStatus === 'session_expired') {
+        setSubmissionStatus('idle');
+        setError(null);
+      }
+      return true;
+    }
+    return false;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Prevent duplicate submission or invalid submission via synchronous ref lock
-    if (isSubmittingRef.current || submitting || !rating || rating < 1 || rating > 5 || !consentGiven) {
+    if (isSubmittingRef.current || submitting || isAiGenerating || !rating || rating < 1 || rating > 5 || !consentGiven) {
       return;
     }
 
@@ -445,9 +472,10 @@ export function PrivateFeedbackForm({
           id="feedback-text"
           value={feedbackText}
           disabled={isFormLocked}
+          readOnly={isAiGenerating}
           aria-describedby="feedback-text-counter"
           onChange={(e) => {
-            if (isFormLocked) return;
+            if (isFormLocked || isAiGenerating) return;
             ensureSession();
             setFeedbackText(e.target.value);
           }}
@@ -463,8 +491,8 @@ export function PrivateFeedbackForm({
             lineHeight: 1.4,
             boxSizing: 'border-box',
             fontFamily: 'inherit',
-            backgroundColor: isFormLocked ? '#f3f4f6' : '#fff',
-            cursor: isFormLocked ? 'not-allowed' : 'text',
+            backgroundColor: isFormLocked || isAiGenerating ? '#f3f4f6' : '#fff',
+            cursor: isFormLocked ? 'not-allowed' : isAiGenerating ? 'default' : 'text',
           }}
         />
         <div
@@ -474,6 +502,22 @@ export function PrivateFeedbackForm({
         >
           {feedbackText.length}/1000 characters
         </div>
+
+        {/* AI Draft Assistant embedded below textarea & counter */}
+        <AiDraftAssistant
+          code={code}
+          feedbackText={feedbackText}
+          rating={rating}
+          serviceIds={selectedServiceIds}
+          googleReviewUrl={googleReviewUrl}
+          brandColor={brandColor}
+          disabled={isFormLocked}
+          onApplyDraft={handleApplyDraft}
+          onRevertDraft={handleRevertDraft}
+          hasAppliedDraft={hasAppliedAiDraft}
+          onGeneratingChange={setIsAiGenerating}
+          onRequestSessionRenew={handleRequestSessionRenew}
+        />
       </div>
 
       {/* Customer Contact Input - 16px font and >= 44px height */}
@@ -575,7 +619,7 @@ export function PrivateFeedbackForm({
       {/* Submit Button with >= 48px Touch Target and High-Contrast Text */}
       <button
         type="submit"
-        disabled={submitting || (!pendingSubmissionRef.current && (!rating || !consentGiven))}
+        disabled={submitting || isAiGenerating || (!pendingSubmissionRef.current && (!rating || !consentGiven))}
         className="touch-press"
         style={{
           minHeight: '48px', // Mobile touch target
@@ -589,7 +633,7 @@ export function PrivateFeedbackForm({
           fontSize: '16px',
           fontWeight: 600,
           cursor:
-            submitting || (!pendingSubmissionRef.current && (!rating || !consentGiven))
+            submitting || isAiGenerating || (!pendingSubmissionRef.current && (!rating || !consentGiven))
               ? 'not-allowed'
               : 'pointer',
           transition: 'background-color 0.2s',

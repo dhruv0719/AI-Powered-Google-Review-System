@@ -1074,4 +1074,443 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
     fireEvent.change(textarea, { target: { value: 'Updated feedback after service refresh' } });
     expect(textarea).toHaveValue('Updated feedback after service refresh');
   });
+
+  // =========================================================================
+  // M6.5 AI Draft Assistant Integration Tests
+  // =========================================================================
+  describe('M6.5 AI Draft Assistant Integration', () => {
+    it('31. should render AI assistant in the private-feedback section below textarea and counter', () => {
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      expect(screen.getByTestId('ai-draft-assistant')).toBeInTheDocument();
+      expect(screen.getByTestId('polish-draft-button')).toBeInTheDocument();
+      expect(screen.getByTestId('polish-draft-button')).toBeDisabled(); // empty feedback
+    });
+
+    it('32. should preserve parent feedback text unchanged after AI generation completes', async () => {
+      const mockDraftResponse = {
+        status: 'generated' as const,
+        draft: 'Polished draft suggestion text from AI.',
+        generationsRemaining: 2,
+        isReplay: false,
+      };
+      vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue(mockDraftResponse);
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      const originalText = 'Great car detailing service with clear attention to detail.';
+      fireEvent.change(textarea, { target: { value: originalText } });
+
+      const polishBtn = screen.getByTestId('polish-draft-button');
+      expect(polishBtn).not.toBeDisabled();
+      fireEvent.click(polishBtn);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
+      });
+
+      // Draft card shows suggestion
+      expect(screen.getByTestId('ai-draft-text')).toHaveTextContent(mockDraftResponse.draft);
+      // Parent textarea must still hold the customer's original text!
+      expect(textarea).toHaveValue(originalText);
+    });
+
+    it('33. should update parent textarea only when customer explicitly clicks Apply', async () => {
+      const mockDraftResponse = {
+        status: 'generated' as const,
+        draft: 'Polished draft suggestion text from AI.',
+        generationsRemaining: 2,
+        isReplay: false,
+      };
+      vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue(mockDraftResponse);
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      const originalText = 'Great car detailing service with clear attention to detail.';
+      fireEvent.change(textarea, { target: { value: originalText } });
+
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
+      });
+
+      // Click Apply
+      fireEvent.click(screen.getByTestId('ai-apply-button'));
+
+      // Textarea now reflects the AI draft
+      expect(textarea).toHaveValue(mockDraftResponse.draft);
+      expect(screen.getByTestId('ai-applied-badge')).toBeInTheDocument();
+    });
+
+    it('34. should restore exact pre-Apply text when customer clicks Revert', async () => {
+      const mockDraftResponse = {
+        status: 'generated' as const,
+        draft: 'Polished draft suggestion text from AI.',
+        generationsRemaining: 2,
+        isReplay: false,
+      };
+      vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue(mockDraftResponse);
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      const originalText = 'Great car detailing service with clear attention to detail.';
+      fireEvent.change(textarea, { target: { value: originalText } });
+
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
+      });
+
+      // Apply
+      fireEvent.click(screen.getByTestId('ai-apply-button'));
+      expect(textarea).toHaveValue(mockDraftResponse.draft);
+
+      // Revert
+      fireEvent.click(screen.getByTestId('ai-revert-button'));
+      expect(textarea).toHaveValue(originalText);
+    });
+
+    it('35. should make textarea read-only and disable submit during generation, then editable afterward', async () => {
+      let resolveAi!: (val: any) => void;
+      const slowAiPromise = new Promise((resolve) => {
+        resolveAi = resolve;
+      });
+      vi.spyOn(publicApi, 'generateAiDraft').mockReturnValue(slowAiPromise as any);
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      // Select rating and consent so submit button would otherwise be enabled
+      fireEvent.click(screen.getByTestId('star-5'));
+      fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Detailed car wash feedback comments.' } });
+
+      const submitBtn = screen.getByRole('button', { name: /submit private feedback/i });
+      expect(submitBtn).not.toBeDisabled();
+
+      // Trigger AI generation
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+
+      // While in-flight: textarea is read-only and submit is disabled
+      expect(textarea).toHaveAttribute('readonly');
+      expect(submitBtn).toBeDisabled();
+
+      // Resolve AI generation
+      resolveAi({
+        status: 'generated',
+        draft: 'Polished text',
+        generationsRemaining: 2,
+        isReplay: false,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
+      });
+
+      // After generation: textarea is no longer read-only and submit is re-enabled
+      expect(textarea).not.toHaveAttribute('readonly');
+      expect(submitBtn).not.toBeDisabled();
+    });
+
+    it('36. should never trigger private-feedback submission when generating or applying an AI draft', async () => {
+      const submitSpy = vi.spyOn(publicApi, 'submitPublicFeedback');
+      vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+        status: 'generated',
+        draft: 'Polished text',
+        generationsRemaining: 2,
+        isReplay: false,
+      });
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Customer input feedback text.' } });
+
+      // Generate
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+      await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
+
+      // Apply
+      fireEvent.click(screen.getByTestId('ai-apply-button'));
+
+      // Zero private feedback submissions
+      expect(submitSpy).not.toHaveBeenCalled();
+    });
+
+    it('37. should allow normal private-feedback submission when AI is disabled (FEATURE_DISABLED)', async () => {
+      vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+        expiresAt: new Date().toISOString(),
+      });
+      vi.spyOn(publicApi, 'generateAiDraft').mockRejectedValue(
+        new PublicApiError('Feature disabled', 503, ErrorCodes.FEATURE_DISABLED)
+      );
+      const submitSpy = vi.spyOn(publicApi, 'submitPublicFeedback').mockResolvedValue({
+        success: true,
+        feedbackId: 'fb_feature_off',
+        message: 'Feedback received',
+      });
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Feedback when feature flag is disabled.' } });
+
+      // Trigger polish: backend returns 503 FEATURE_DISABLED
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('ai-draft-assistant')).not.toBeInTheDocument();
+      });
+
+      // Private feedback form functions normally
+      fireEvent.click(screen.getByTestId('star-4'));
+      fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+      fireEvent.click(screen.getByRole('button', { name: /submit private feedback/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('feedback-success')).toBeInTheDocument();
+      });
+      expect(submitSpy).toHaveBeenCalled();
+    });
+
+    it('38. should not block private-feedback submission when AI generation fails with an error', async () => {
+      vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+        expiresAt: new Date().toISOString(),
+      });
+      vi.spyOn(publicApi, 'generateAiDraft').mockRejectedValue(
+        new PublicApiError('AI timeout', 504, ErrorCodes.AI_PROVIDER_UNAVAILABLE)
+      );
+      const submitSpy = vi.spyOn(publicApi, 'submitPublicFeedback').mockResolvedValue({
+        success: true,
+        feedbackId: 'fb_after_ai_err',
+        message: 'Feedback received',
+      });
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Feedback with failing AI provider.' } });
+
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-error-notice')).toHaveTextContent('temporarily unavailable');
+      });
+
+      // Submit private feedback with original text
+      fireEvent.click(screen.getByTestId('star-5'));
+      fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+      fireEvent.click(screen.getByRole('button', { name: /submit private feedback/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('feedback-success')).toBeInTheDocument();
+      });
+      expect(submitSpy).toHaveBeenCalledWith(
+        defaultProps.code,
+        expect.objectContaining({
+          feedbackText: 'Feedback with failing AI provider.',
+        })
+      );
+    });
+
+    it('39. should ensure Google Review CTA remains unconditionally accessible across all AI states', async () => {
+      vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+        status: 'generated',
+        draft: 'Polished draft',
+        generationsRemaining: 2,
+        isReplay: false,
+      });
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Feedback text to generate draft.' } });
+
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+      await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
+
+      // Google review link inside AI draft card uses trusted prop
+      const googleLink = screen.getByTestId('ai-open-google-button');
+      expect(googleLink).toHaveAttribute('href', defaultProps.googleReviewUrl);
+      expect(googleLink).toHaveAttribute('target', '_blank');
+      expect(googleLink).toHaveAttribute('rel', 'noopener noreferrer');
+    });
+
+    it('40. should display explicit recovery action and avoid automatic renewal on INVALID_SESSION', async () => {
+      const sessionSpy = vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+        expiresAt: new Date().toISOString(),
+      });
+      vi.spyOn(publicApi, 'generateAiDraft').mockRejectedValue(
+        new PublicApiError('Session expired', 401, ErrorCodes.INVALID_SESSION)
+      );
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Feedback text for expired session.' } });
+
+      // Clear spy after initial lazy typing session establishment
+      sessionSpy.mockClear();
+
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-error-notice')).toHaveTextContent(
+          'Your review session has expired. Start a new session to continue.'
+        );
+      });
+
+      // Explicit recovery button must be displayed
+      const renewBtn = screen.getByTestId('ai-renew-session-button');
+      expect(renewBtn).toBeInTheDocument();
+      expect(renewBtn).toHaveTextContent('Start a new review session');
+
+      // createPublicSession was NOT called automatically on 401!
+      expect(sessionSpy).not.toHaveBeenCalled();
+    });
+
+    it('41. should only trigger session renewal after explicit user click on recovery button', async () => {
+      const sessionSpy = vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+        expiresAt: new Date().toISOString(),
+      });
+      vi.spyOn(publicApi, 'generateAiDraft').mockRejectedValue(
+        new PublicApiError('Session expired', 401, ErrorCodes.INVALID_SESSION)
+      );
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Feedback text for expired session.' } });
+
+      // Clear spy after initial lazy typing session establishment
+      sessionSpy.mockClear();
+
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+      await waitFor(() => expect(screen.getByTestId('ai-renew-session-button')).toBeInTheDocument());
+
+      expect(sessionSpy).not.toHaveBeenCalled();
+
+      // User explicitly clicks "Start a new review session"
+      fireEvent.click(screen.getByTestId('ai-renew-session-button'));
+
+      await waitFor(() => {
+        expect(sessionSpy).toHaveBeenCalledTimes(1);
+      });
+      // Error message is cleared
+      expect(screen.queryByTestId('ai-error-notice')).not.toBeInTheDocument();
+    });
+
+    it('42. should preserve all entered form data across session recovery (feedback, rating, services, consent, contact)', async () => {
+      vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+        expiresAt: new Date().toISOString(),
+      });
+      vi.spyOn(publicApi, 'generateAiDraft').mockRejectedValue(
+        new PublicApiError('Session expired', 401, ErrorCodes.INVALID_SESSION)
+      );
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      // Fill all form fields
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      const contactInput = screen.getByPlaceholderText(/contact you back/i);
+      const feedbackVal = 'Carefully composed comments that must not be lost.';
+      const contactVal = 'customer@example.com';
+
+      fireEvent.change(textarea, { target: { value: feedbackVal } });
+      fireEvent.change(contactInput, { target: { value: contactVal } });
+      fireEvent.click(screen.getByTestId('star-5'));
+      fireEvent.click(screen.getByText('Ceramic Coating'));
+      fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+
+      // Trigger AI draft, which fails with 401
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+      await waitFor(() => expect(screen.getByTestId('ai-renew-session-button')).toBeInTheDocument());
+
+      // Click recovery
+      fireEvent.click(screen.getByTestId('ai-renew-session-button'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('ai-error-notice')).not.toBeInTheDocument();
+      });
+
+      // Verification: ALL form fields survived completely intact!
+      expect(textarea).toHaveValue(feedbackVal);
+      expect(contactInput).toHaveValue(contactVal);
+      expect(screen.getByTestId('star-5')).toBeChecked();
+      expect(screen.getByText('Ceramic Coating')).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('checkbox', { name: /i agree/i })).toBeChecked();
+    });
+
+    it('43. should preserve form data and display helpful error if session renewal fails', async () => {
+      vi.spyOn(publicApi, 'createPublicSession').mockRejectedValue(
+        new Error('Network offline during session renewal')
+      );
+      vi.spyOn(publicApi, 'generateAiDraft').mockRejectedValue(
+        new PublicApiError('Session expired', 401, ErrorCodes.INVALID_SESSION)
+      );
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      const feedbackVal = 'Customer comments preserved despite renewal failure.';
+      fireEvent.change(textarea, { target: { value: feedbackVal } });
+      fireEvent.click(screen.getByTestId('star-4'));
+
+      // AI draft fails with 401
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+      await waitFor(() => expect(screen.getByTestId('ai-renew-session-button')).toBeInTheDocument());
+
+      // Click recovery, which rejects
+      fireEvent.click(screen.getByTestId('ai-renew-session-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-error-notice')).toHaveTextContent(
+          'Unable to start a new review session. Please check your connection and try again.'
+        );
+      });
+
+      // Form data must STILL be preserved!
+      expect(textarea).toHaveValue(feedbackVal);
+      expect(screen.getByTestId('star-4')).toBeChecked();
+    });
+
+    it('44. should never automatically retry AI draft generation after session renewal', async () => {
+      vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+        expiresAt: new Date().toISOString(),
+      });
+      const aiSpy = vi.spyOn(publicApi, 'generateAiDraft').mockRejectedValue(
+        new PublicApiError('Session expired', 401, ErrorCodes.INVALID_SESSION)
+      );
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Comments to test auto-retry absence.' } });
+
+      // AI draft attempt 1 (fails with 401)
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+      await waitFor(() => expect(screen.getByTestId('ai-renew-session-button')).toBeInTheDocument());
+
+      expect(aiSpy).toHaveBeenCalledTimes(1);
+
+      // User recovers session
+      fireEvent.click(screen.getByTestId('ai-renew-session-button'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('ai-error-notice')).not.toBeInTheDocument();
+      });
+
+      // Call count remains exactly 1 — NO automatic retry!
+      expect(aiSpy).toHaveBeenCalledTimes(1);
+
+      // Quota indicator resets to neutral
+      expect(screen.getByTestId('ai-quota-indicator')).toHaveTextContent(
+        'Up to 3 AI drafts per visit'
+      );
+      // Polish button is ready for explicit user action
+      expect(screen.getByTestId('polish-draft-button')).not.toBeDisabled();
+    });
+  });
 });

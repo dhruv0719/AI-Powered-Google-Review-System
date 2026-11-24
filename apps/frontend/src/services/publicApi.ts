@@ -2,6 +2,8 @@ import {
   PublicQRResolutionDTO,
   PublicSessionResponseDTO,
   CreatePrivateFeedbackInput,
+  DraftGenerationRequestInput,
+  DraftGenerationResponseDTO,
 } from '@review-system/shared';
 
 const API_BASE = '/api/v1';
@@ -55,6 +57,18 @@ export const publicApi = {
   ): Promise<{ success: boolean; feedbackId: string; message: string }> =>
     publicRequest<{ success: boolean; feedbackId: string; message: string }>(
       `/public/qr/${encodeURIComponent(code)}/feedback`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    ),
+
+  generateAiDraft: (
+    code: string,
+    data: DraftGenerationRequestInput
+  ): Promise<DraftGenerationResponseDTO> =>
+    publicRequest<DraftGenerationResponseDTO>(
+      `/public/qr/${encodeURIComponent(code)}/generate-draft`,
       {
         method: 'POST',
         body: JSON.stringify(data),
