@@ -11,6 +11,7 @@ import { PromptEngine } from './prompt_engine.js';
 import { OutputValidationPipeline } from './output_validator.js';
 import { AiProvider } from './adapters/ai_provider.interface.js';
 import { MockAiProvider } from './adapters/mock_provider.js';
+import { GroqAiProvider } from './adapters/groq_provider.js';
 import { computePayloadFingerprint } from './fingerprint.js';
 import {
   canonicalizeLanguage,
@@ -32,7 +33,19 @@ export class AiOrchestrator {
   private readonly defaultProvider: AiProvider;
 
   constructor(defaultProvider?: AiProvider) {
-    this.defaultProvider = defaultProvider ?? new MockAiProvider();
+    if (defaultProvider) {
+      this.defaultProvider = defaultProvider;
+    } else {
+      const env = getEnv();
+      if (env.AI_PROVIDER === 'groq') {
+        this.defaultProvider = new GroqAiProvider({
+          apiKey: env.GROQ_API_KEY!,
+          model: env.AI_MODEL,
+        });
+      } else {
+        this.defaultProvider = new MockAiProvider();
+      }
+    }
   }
 
   /**
@@ -103,9 +116,9 @@ export class AiOrchestrator {
 
       // Semantic failures (too short, low diversity, spam, mash) consume 0 quota and 0 leases
       return {
-        status: 'insufficient_context',
+        status: 'insufficient_context' ,
         draft: null,
-        generationsRemaining: sessionContext.generationsRemaining,
+        generationsRemaining: sessionContext.generationsRemaining,  
         isReplay: false,
       };
     }
