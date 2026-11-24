@@ -14,6 +14,7 @@ import {
   CampaignCodeSchema,
   CreatePrivateFeedbackSchema,
   CustomerSessionConstants,
+  DraftGenerationRequestSchema,
   ErrorCodes,
   PublicQRResolutionDTO,
   PublicSessionResponseDTO,
@@ -22,13 +23,33 @@ import {
 import { generateSessionToken, hashSessionToken, computePayloadFingerprint } from '../utils/crypto.js';
 import { validatePublicOrigin } from '../utils/csrf.js';
 import { getEnv } from '../config/env.js';
+import { AiOrchestrator } from '../ai/ai_orchestrator.js';
+import {
+  AiValidationError,
+  CampaignInactiveError,
+  ConcurrentGenerationError,
+  FeatureDisabledError,
+  GoogleReviewUrlRequiredError,
+  IdempotencyConflictError,
+  InvalidSessionError,
+  LeaseLostError,
+  OutputGuardrailError,
+  QuotaExceededError,
+  TenantSuspendedError,
+} from '../ai/session_guard.js';
+import {
+  AiProviderTimeoutError,
+  AiProviderUnavailableError,
+} from '../ai/types.js';
 
 export interface PublicRoutesOptions {
   rateLimitOverrides?: {
     qrGetMax?: number;
     sessionsPostMax?: number;
     feedbackPostMax?: number;
+    generateDraftMax?: number;
   };
+  aiOrchestrator?: AiOrchestrator;
 }
 
 export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
@@ -41,6 +62,8 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
   const qrGetMax = opts?.rateLimitOverrides?.qrGetMax ?? (isTest ? 1000 : 120);
   const sessionsPostMax = opts?.rateLimitOverrides?.sessionsPostMax ?? (isTest ? 1000 : 30);
   const feedbackPostMax = opts?.rateLimitOverrides?.feedbackPostMax ?? (isTest ? 1000 : 10);
+  const generateDraftMax = opts?.rateLimitOverrides?.generateDraftMax ?? (isTest ? 1000 : 10);
+  const aiOrchestrator = opts?.aiOrchestrator ?? new AiOrchestrator();
 
   // 1. Read-only Public QR Resolution (ZERO writes, ZERO session generation)
   fastify.get(
@@ -619,6 +642,233 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
         feedbackId: txResult.feedback.id,
         message: 'Thank you for your feedback!',
       });
+    }
+  );
+
+  // Helper for centralized AI error mapping without leaking internal prompts, traces, or database errors
+  function mapAiOrchestratorError(
+    err: unknown,
+    request: FastifyRequest,
+    reply: FastifyReply
+  ): FastifyReply {
+    if (err instanceof FeatureDisabledError) {
+      return reply.status(503).send({
+        error: {
+          code: ErrorCodes.FEATURE_DISABLED,
+          message: 'AI review assistant is currently disabled.',
+        },
+      });
+    }
+
+    if (err instanceof InvalidSessionError) {
+      return reply.status(401).send({
+        error: {
+          code: ErrorCodes.INVALID_SESSION,
+          message: 'Session has expired or is invalid. Please refresh the page.',
+        },
+      });
+    }
+
+    if (err instanceof TenantSuspendedError) {
+      return reply.status(403).send({
+        error: {
+          code: ErrorCodes.TENANT_SUSPENDED,
+          message: 'This business is currently unavailable.',
+        },
+      });
+    }
+
+    if (err instanceof CampaignInactiveError) {
+      return reply.status(400).send({
+        error: {
+          code: ErrorCodes.CAMPAIGN_INACTIVE,
+          message: 'This review campaign is currently inactive.',
+        },
+      });
+    }
+
+    if (err instanceof GoogleReviewUrlRequiredError) {
+      return reply.status(400).send({
+        error: {
+          code: ErrorCodes.GOOGLE_REVIEW_URL_REQUIRED,
+          message: 'A valid Google Review URL must be configured for this location.',
+        },
+      });
+    }
+
+    if (err instanceof AiValidationError) {
+      return reply.status(400).send({
+        error: {
+          code: ErrorCodes.VALIDATION_ERROR,
+          message: err.message,
+        },
+      });
+    }
+
+    if (err instanceof IdempotencyConflictError) {
+      return reply.status(409).send({
+        error: {
+          code: ErrorCodes.IDEMPOTENCY_KEY_REUSE_PAYLOAD_MISMATCH,
+          message: 'Client draft ID was already submitted with different input parameters',
+        },
+      });
+    }
+
+    if (err instanceof ConcurrentGenerationError || err instanceof LeaseLostError) {
+      return reply.status(409).send({
+        error: {
+          code: ErrorCodes.CONCURRENT_GENERATION_IN_PROGRESS,
+          message: 'A review draft generation is already in progress for this session',
+        },
+      });
+    }
+
+    if (err instanceof QuotaExceededError) {
+      return reply.status(429).send({
+        error: {
+          code: ErrorCodes.QUOTA_EXCEEDED,
+          message: 'Draft generation quota exceeded for this session',
+        },
+      });
+    }
+
+    if (err instanceof OutputGuardrailError) {
+      request.log.warn({ reasonCode: err.reasonCode }, 'Output guardrail rejected AI draft');
+      return reply.status(502).send({
+        error: {
+          code: ErrorCodes.OUTPUT_GUARDRAIL_FAILED,
+          message: 'The generated draft did not meet quality or safety standards. Please try adjusting your feedback.',
+        },
+      });
+    }
+
+    if (
+      err instanceof AiProviderTimeoutError ||
+      (err instanceof Error && err.name === 'AbortError')
+    ) {
+      request.log.warn({ err }, 'AI provider timed out');
+      return reply.status(504).send({
+        error: {
+          code: ErrorCodes.AI_PROVIDER_UNAVAILABLE,
+          message: 'AI generation service timed out. Please try again later.',
+        },
+      });
+    }
+
+    if (err instanceof AiProviderUnavailableError) {
+      request.log.warn({ err }, 'AI provider unavailable');
+      return reply.status(502).send({
+        error: {
+          code: ErrorCodes.AI_PROVIDER_UNAVAILABLE,
+          message: 'AI generation service is temporarily unavailable. Please try again later.',
+        },
+      });
+    }
+
+    // Unexpected internal errors: log detailed error, but never expose stack trace or DB details to client
+    request.log.error(err);
+    return reply.status(500).send({
+      error: {
+        code: ErrorCodes.INTERNAL_ERROR,
+        message: 'An unexpected internal error occurred. Please try again later.',
+        requestId: request.id,
+      },
+    });
+  }
+
+  // 4. Public AI Review Draft Generation
+  fastify.post(
+    '/qr/:code/generate-draft',
+    {
+      bodyLimit: 16384, // 16 KB strict route-specific body limit
+      config: {
+        rateLimit: {
+          max: generateDraftMax,
+          timeWindow: '1 minute',
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{ Params: { code: string } }>,
+      reply: FastifyReply
+    ) => {
+      // 1. CSRF Origin validation
+      if (!validatePublicOrigin(request, reply)) {
+        return;
+      }
+
+      const { code } = request.params;
+      const rawToken = request.cookies[CustomerSessionConstants.COOKIE_NAME];
+      if (!rawToken) {
+        return reply.status(401).send({
+          error: {
+            code: ErrorCodes.INVALID_SESSION,
+            message: 'Customer session cookie missing or expired. Please interact with the page to start a new session.',
+          },
+        });
+      }
+
+      // 2. Transport schema validation
+      const parseResult = DraftGenerationRequestSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        return reply.status(400).send({
+          error: {
+            code: ErrorCodes.VALIDATION_ERROR,
+            message: 'Invalid draft generation request',
+            details: parseResult.error.issues.map((i) => ({
+              field: i.path.join('.'),
+              issue: i.message,
+            })),
+          },
+        });
+      }
+
+      const body = parseResult.data;
+      const db = getDb();
+      const tokenHash = hashSessionToken(rawToken);
+
+      // 3. Authenticate customer session via token hash
+      const [session] = await db
+        .select()
+        .from(ephemeralSessions)
+        .where(eq(ephemeralSessions.tokenHash, tokenHash))
+        .limit(1);
+
+      if (!session) {
+        return reply.status(401).send({
+          error: {
+            code: ErrorCodes.INVALID_SESSION,
+            message: 'Invalid or expired session',
+          },
+        });
+      }
+
+      if (new Date(session.expiresAt) <= new Date()) {
+        return reply.status(401).send({
+          error: {
+            code: ErrorCodes.INVALID_SESSION,
+            message: 'Session has expired. Please refresh the page.',
+          },
+        });
+      }
+
+      // 4. Verify session binding to issued campaign code
+      if (session.issuedCode !== code) {
+        return reply.status(401).send({
+          error: {
+            code: ErrorCodes.INVALID_SESSION,
+            message: 'Session does not match this campaign code',
+          },
+        });
+      }
+
+      // 5. Delegate to AiOrchestrator (handles validity, locks, provider, guardrails, settlement)
+      try {
+        const result = await aiOrchestrator.generateDraft(db, session.id, body);
+        return reply.status(200).send(result);
+      } catch (err) {
+        return mapAiOrchestratorError(err, request, reply);
+      }
     }
   );
 };

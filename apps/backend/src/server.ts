@@ -13,13 +13,16 @@ import { campaignRoutes } from './routes/campaign.routes.js';
 import { publicRoutes } from './routes/public.routes.js';
 import { feedbackRoutes } from './routes/feedback.routes.js';
 import { ErrorCodes } from '@review-system/shared';
+import { AiOrchestrator } from './ai/ai_orchestrator.js';
 
 export interface BuildServerOptions {
   rateLimitOverrides?: {
     qrGetMax?: number;
     sessionsPostMax?: number;
     feedbackPostMax?: number;
+    generateDraftMax?: number;
   };
+  aiOrchestrator?: AiOrchestrator;
 }
 
 export function buildServer(options?: BuildServerOptions): FastifyInstance {
@@ -92,6 +95,7 @@ export function buildServer(options?: BuildServerOptions): FastifyInstance {
   fastify.register(publicRoutes, {
     prefix: '/api/v1/public',
     rateLimitOverrides: options?.rateLimitOverrides,
+    aiOrchestrator: options?.aiOrchestrator,
   });
 
   // Centralized Error Handler

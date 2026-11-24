@@ -19,6 +19,11 @@ const EnvSchema = z.object({
     .transform((val) => val === 'true'),
   PUBLIC_WEB_URL: z.string().default('http://localhost:5173'),
   TRUSTED_PROXIES: z.string().default('127.0.0.1,::1'),
+  ENABLE_AI_ASSISTANT: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((val) => val.trim().toLowerCase() === 'true'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -35,4 +40,8 @@ export function getEnv(): Env {
     envInstance = result.data;
   }
   return envInstance;
+}
+
+export function resetEnv(): void {
+  envInstance = null;
 }
