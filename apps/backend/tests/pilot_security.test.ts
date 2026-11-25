@@ -65,6 +65,7 @@ describe('Phase 7.0.3 Pilot Security Remediation Tests', () => {
     it('defaults COOKIE_SECURE to true when NODE_ENV=production and COOKIE_SECURE is unset', () => {
       process.env.NODE_ENV = 'production';
       process.env.SESSION_SECRET = 'a'.repeat(32);
+      process.env.INTERNAL_PROXY_SECRET = 'b'.repeat(32);
       delete process.env.COOKIE_SECURE;
 
       const env = getEnv();
@@ -174,6 +175,7 @@ describe('Phase 7.0.3 Pilot Security Remediation Tests', () => {
     it('accepts startup in production with an explicit, non-default, 32+ character secret', () => {
       process.env.NODE_ENV = 'production';
       process.env.SESSION_SECRET = 'custom-production-session-secret-key-32chars!';
+      process.env.INTERNAL_PROXY_SECRET = 'custom-production-proxy-secret-key-32chars!';
 
       const env = getEnv();
       expect(env.SESSION_SECRET).toBe('custom-production-session-secret-key-32chars!');
