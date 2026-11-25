@@ -8,6 +8,7 @@
 
 export interface PagesEnv {
   BACKEND_URL?: string;
+  INTERNAL_PROXY_SECRET?: string;
   [key: string]: unknown;
 }
 
@@ -125,6 +126,57 @@ export function validateBackendUrl(
 }
 
 /**
+ * Validates whether a given string is a syntactically valid IPv4 or IPv6 address
+ */
+export function isValidIp(ip?: string | null): boolean {
+  if (!ip || typeof ip !== 'string') return false;
+  const trimmed = ip.trim();
+
+  // IPv4 check: 4 decimal octets (0-255) without leading zeroes
+  const ipv4Parts = trimmed.split('.');
+  if (ipv4Parts.length === 4) {
+    for (const part of ipv4Parts) {
+      if (!/^\d+$/.test(part)) return false;
+      if (part.length > 1 && part.startsWith('0')) return false;
+      const num = Number(part);
+      if (num < 0 || num > 255) return false;
+    }
+    return true;
+  }
+
+  // IPv6 check: 16-bit hex colon groups with optional '::' compression
+  if (trimmed.includes(':')) {
+    if (trimmed.includes(':::')) return false;
+    const doubleColons = trimmed.split('::');
+    if (doubleColons.length > 2) return false;
+    if (doubleColons.length === 1) {
+      if (trimmed.startsWith(':') || trimmed.endsWith(':')) return false;
+      const parts = trimmed.split(':');
+      if (parts.length !== 8) return false;
+      for (const part of parts) {
+        if (!/^[0-9a-fA-F]{1,4}$/.test(part)) return false;
+      }
+      return true;
+    } else {
+      const [left, right] = doubleColons;
+      if (left.endsWith(':') || right.startsWith(':')) return false;
+      if (left.startsWith(':') && left !== '') return false;
+      if (right.endsWith(':') && right !== '') return false;
+      const leftParts = left === '' ? [] : left.split(':');
+      const rightParts = right === '' ? [] : right.split(':');
+      const totalParts = leftParts.length + rightParts.length;
+      if (totalParts >= 8) return false;
+      for (const part of [...leftParts, ...rightParts]) {
+        if (!/^[0-9a-fA-F]{1,4}$/.test(part)) return false;
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Strips hop-by-hop headers and untrusted incoming X-Forwarded-* headers,
  * while preserving legitimate client headers (Origin, Cookie, Authorization, Content-Type, etc.)
  */
@@ -150,8 +202,13 @@ export function filterForwardHeaders(headers: Headers): Headers {
       continue;
     }
 
-    // Strip untrusted client X-Forwarded-* headers
+    // Strip untrusted client X-Forwarded-* headers (including browser X-Forwarded-Client-IP)
     if (lowerKey.startsWith('x-forwarded-')) {
+      continue;
+    }
+
+    // Strip untrusted client proxy identity assertion headers
+    if (lowerKey === 'x-proxy-secret') {
       continue;
     }
 
@@ -277,9 +334,22 @@ export const onRequest: PagesFunction<PagesEnv> = async (context) => {
   const method = request.method.toUpperCase();
   const hasBody = method !== 'GET' && method !== 'HEAD';
 
+  const forwardHeaders = filterForwardHeaders(request.headers);
+
+  // Authenticated proxy identity assertion: derive client IP from Cloudflare's trusted context
+  const rawClientIp = request.headers.get('cf-connecting-ip');
+  if (rawClientIp && isValidIp(rawClientIp)) {
+    forwardHeaders.set('x-forwarded-client-ip', rawClientIp.trim());
+  }
+
+  // Forward the internal proxy secret if configured
+  if (env?.INTERNAL_PROXY_SECRET && typeof env.INTERNAL_PROXY_SECRET === 'string') {
+    forwardHeaders.set('x-proxy-secret', env.INTERNAL_PROXY_SECRET.trim());
+  }
+
   const fetchInit: RequestInit & { duplex?: 'half' } = {
     method,
-    headers: filterForwardHeaders(request.headers),
+    headers: forwardHeaders,
     redirect: 'manual',
     cache: 'no-store',
   };

@@ -6,6 +6,7 @@ import {
   filterResponseHeaders,
   extractSetCookies,
   createErrorResponse,
+  isValidIp,
   EventContext,
   PagesEnv,
 } from '../../../../functions/api/[[catchall]].ts';
@@ -796,6 +797,191 @@ describe('Cloudflare Pages API Proxy Implementation (Phase 8.4.3)', () => {
           code: 'SERVICE_UNAVAILABLE',
           message: 'Service is currently unavailable.',
         },
+      });
+    });
+  });
+
+  describe('6. Proxy Identity Assertion & Client IP Propagation (Phase 8.4.5.2)', () => {
+    describe('IP Syntax Validation (isValidIp)', () => {
+      it('validates correct IPv4 addresses', () => {
+        expect(isValidIp('1.1.1.1')).toBe(true);
+        expect(isValidIp('192.168.1.1')).toBe(true);
+        expect(isValidIp('127.0.0.1')).toBe(true);
+        expect(isValidIp('255.255.255.255')).toBe(true);
+        expect(isValidIp('0.0.0.0')).toBe(true);
+        expect(isValidIp(' 198.51.100.1 ')).toBe(true);
+      });
+
+      it('validates correct IPv6 addresses', () => {
+        expect(isValidIp('::1')).toBe(true);
+        expect(isValidIp('2001:db8::1')).toBe(true);
+        expect(isValidIp('fe80::1')).toBe(true);
+        expect(isValidIp('2400:cb00:2048:1::c629:d7a2')).toBe(true);
+        expect(isValidIp('2001:0db8:85a3:0000:0000:8a2e:0370:7334')).toBe(true);
+      });
+
+      it('rejects invalid or malformed IP addresses', () => {
+        expect(isValidIp(undefined)).toBe(false);
+        expect(isValidIp(null)).toBe(false);
+        expect(isValidIp('')).toBe(false);
+        expect(isValidIp('   ')).toBe(false);
+        // IPv4 with leading zeros
+        expect(isValidIp('01.02.03.04')).toBe(false);
+        expect(isValidIp('192.168.01.1')).toBe(false);
+        // Numbers > 255
+        expect(isValidIp('256.0.0.1')).toBe(false);
+        expect(isValidIp('192.168.1.999')).toBe(false);
+        // Non-numeric
+        expect(isValidIp('192.168.1.abc')).toBe(false);
+        expect(isValidIp('example.com')).toBe(false);
+        // Incomplete
+        expect(isValidIp('192.168.1')).toBe(false);
+        expect(isValidIp('192.168.1.1.1')).toBe(false);
+        // IPv6 malformed
+        expect(isValidIp('2001:::1')).toBe(false);
+        expect(isValidIp('2001::db8::1')).toBe(false);
+        expect(isValidIp('2001:xyz::1')).toBe(false);
+        // Injection attempts
+        expect(isValidIp('127.0.0.1\r\nHost: evil.com')).toBe(false);
+        expect(isValidIp('127.0.0.1, 10.0.0.1')).toBe(false);
+      });
+    });
+
+    describe('Proxy Header Sanitation and Assertion', () => {
+      it('strips incoming x-forwarded-client-ip and x-proxy-secret headers in filterForwardHeaders', () => {
+        const clientHeaders = new Headers({
+          'x-forwarded-client-ip': '1.2.3.4',
+          'x-proxy-secret': 'spoofed-secret',
+          'x-forwarded-for': '5.6.7.8',
+          'x-forwarded-proto': 'https',
+          'x-custom-header': 'safe-value',
+        });
+
+        const filtered = filterForwardHeaders(clientHeaders);
+        expect(filtered.get('x-forwarded-client-ip')).toBeNull();
+        expect(filtered.get('x-proxy-secret')).toBeNull();
+        expect(filtered.get('x-forwarded-for')).toBeNull();
+        expect(filtered.get('x-forwarded-proto')).toBeNull();
+        expect(filtered.get('x-custom-header')).toBe('safe-value');
+      });
+
+      it('forwards verified client IP from cf-connecting-ip and INTERNAL_PROXY_SECRET in onRequest', async () => {
+        let capturedInit: RequestInit | undefined;
+        globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+          capturedInit = init;
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        });
+
+        const clientReq = new Request('https://my-saas.pages.dev/api/v1/auth/me', {
+          method: 'GET',
+          headers: {
+            'cf-connecting-ip': '203.0.113.195',
+            'x-forwarded-client-ip': '10.0.0.1', // Spoofed client header
+            'x-proxy-secret': 'attacker-secret', // Spoofed secret
+          },
+        });
+
+        const context: EventContext<PagesEnv> = {
+          request: clientReq,
+          env: {
+            BACKEND_URL: 'https://staging-backend.onrender.com',
+            INTERNAL_PROXY_SECRET: 'super-secure-internal-proxy-secret-at-least-32-chars',
+          },
+          functionPath: '/api',
+          waitUntil: vi.fn(),
+          next: vi.fn(),
+          params: {},
+          data: {},
+        };
+
+        const res = await onRequest(context);
+        expect(res.status).toBe(200);
+
+        const forwardedHeaders = new Headers(capturedInit?.headers);
+        // Must use verified cf-connecting-ip, NOT spoofed 10.0.0.1
+        expect(forwardedHeaders.get('x-forwarded-client-ip')).toBe('203.0.113.195');
+        // Must use env INTERNAL_PROXY_SECRET, NOT spoofed attacker-secret
+        expect(forwardedHeaders.get('x-proxy-secret')).toBe(
+          'super-secure-internal-proxy-secret-at-least-32-chars'
+        );
+      });
+
+      it('does not forward x-forwarded-client-ip when cf-connecting-ip is invalid', async () => {
+        let capturedInit: RequestInit | undefined;
+        globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+          capturedInit = init;
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        });
+
+        const clientReq = new Request('https://my-saas.pages.dev/api/v1/auth/me', {
+          method: 'GET',
+          headers: {
+            'cf-connecting-ip': 'invalid-malformed-ip',
+            'x-forwarded-client-ip': '10.0.0.1',
+          },
+        });
+
+        const context: EventContext<PagesEnv> = {
+          request: clientReq,
+          env: {
+            BACKEND_URL: 'https://staging-backend.onrender.com',
+          },
+          functionPath: '/api',
+          waitUntil: vi.fn(),
+          next: vi.fn(),
+          params: {},
+          data: {},
+        };
+
+        const res = await onRequest(context);
+        expect(res.status).toBe(200);
+
+        const forwardedHeaders = new Headers(capturedInit?.headers);
+        expect(forwardedHeaders.get('x-forwarded-client-ip')).toBeNull();
+        expect(forwardedHeaders.get('x-proxy-secret')).toBeNull();
+      });
+
+      it('omits x-proxy-secret when INTERNAL_PROXY_SECRET is not configured in env', async () => {
+        let capturedInit: RequestInit | undefined;
+        globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+          capturedInit = init;
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        });
+
+        const clientReq = new Request('https://my-saas.pages.dev/api/v1/auth/me', {
+          method: 'GET',
+          headers: {
+            'cf-connecting-ip': '198.51.100.5',
+          },
+        });
+
+        const context: EventContext<PagesEnv> = {
+          request: clientReq,
+          env: {
+            BACKEND_URL: 'https://staging-backend.onrender.com',
+          },
+          functionPath: '/api',
+          waitUntil: vi.fn(),
+          next: vi.fn(),
+          params: {},
+          data: {},
+        };
+
+        const res = await onRequest(context);
+        expect(res.status).toBe(200);
+
+        const forwardedHeaders = new Headers(capturedInit?.headers);
+        expect(forwardedHeaders.get('x-forwarded-client-ip')).toBe('198.51.100.5');
+        expect(forwardedHeaders.get('x-proxy-secret')).toBeNull();
       });
     });
   });
