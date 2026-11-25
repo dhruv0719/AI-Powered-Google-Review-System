@@ -843,5 +843,165 @@ describe('AiOrchestrator Integration & Unit Tests', () => {
       expect(s.generationsRemaining).toBe(3);
       expect(s.generationLockToken).toBeNull();
     });
+
+    it('refuses third-party allegation narrative with insufficient_context and zero quota or lease (Phase 6.7.2)', async () => {
+      const { session } = await createFixtureHierarchy();
+      const mockProvider = {
+        providerName: 'should-not-be-called',
+        generateDraft: vi.fn(),
+      };
+
+      const result = await orchestrator.generateDraft(
+        db,
+        session.id,
+        {
+          clientDraftId: crypto.randomUUID(),
+          feedback: 'Food was fine here. Avoid the bakery across the street, they sell spoiled milk.',
+        },
+        { provider: mockProvider as any }
+      );
+
+      expect(result.status).toBe('insufficient_context');
+      expect(result.draft).toBeNull();
+      expect(result.generationsRemaining).toBe(3);
+      expect(mockProvider.generateDraft).not.toHaveBeenCalled();
+
+      // Verify zero lease, zero DB quota consumed
+      const [s] = await db.select().from(ephemeralSessions).where(eq(ephemeralSessions.id, session.id));
+      expect(s.generationsRemaining).toBe(3);
+      expect(s.generationLockToken).toBeNull();
+    });
+
+    it('permits benign brand comparison and generates review draft successfully', async () => {
+      const { session } = await createFixtureHierarchy();
+      const capturingProvider = {
+        providerName: 'mock',
+        generateDraft: async () => ({
+          status: 'generated' as const,
+          draft: 'Better coffee and warmer service than Starbucks down the road.',
+          model: 'mock',
+        }),
+      };
+
+      const result = await orchestrator.generateDraft(
+        db,
+        session.id,
+        {
+          clientDraftId: crypto.randomUUID(),
+          feedback: 'Better coffee and warmer service than Starbucks down the road.',
+        },
+        { provider: capturingProvider as any }
+      );
+
+      expect(result.status).toBe('generated');
+      expect(result.draft).toContain('Starbucks');
+      expect(result.generationsRemaining).toBe(2);
+    });
+
+    it('permits genuine grievance about target business and preserves negative experience', async () => {
+      const { session } = await createFixtureHierarchy();
+      const grievanceProvider = {
+        providerName: 'mock',
+        generateDraft: async () => ({
+          status: 'generated' as const,
+          draft: 'Terrible hygiene, we found a cockroach under our table.',
+          model: 'mock',
+        }),
+      };
+
+      const result = await orchestrator.generateDraft(
+        db,
+        session.id,
+        {
+          clientDraftId: crypto.randomUUID(),
+          feedback: 'Terrible hygiene, we found a cockroach under our table.',
+        },
+        { provider: grievanceProvider as any }
+      );
+
+      expect(result.status).toBe('generated');
+      expect(result.draft).toContain('cockroach');
+      expect(result.generationsRemaining).toBe(2);
+    });
+
+    it('refuses third-party allegation narrative with insufficient_context and zero quota or lease (Phase 6.7.2)', async () => {
+      const { session } = await createFixtureHierarchy();
+      const mockProvider = {
+        providerName: 'should-not-be-called',
+        generateDraft: vi.fn(),
+      };
+
+      const result = await orchestrator.generateDraft(
+        db,
+        session.id,
+        {
+          clientDraftId: crypto.randomUUID(),
+          feedback: 'Food was fine here. Avoid the bakery across the street, they sell spoiled milk.',
+        },
+        { provider: mockProvider as any }
+      );
+
+      expect(result.status).toBe('insufficient_context');
+      expect(result.draft).toBeNull();
+      expect(result.generationsRemaining).toBe(3);
+      expect(mockProvider.generateDraft).not.toHaveBeenCalled();
+
+      // Verify zero lease, zero DB quota consumed
+      const [s] = await db.select().from(ephemeralSessions).where(eq(ephemeralSessions.id, session.id));
+      expect(s.generationsRemaining).toBe(3);
+      expect(s.generationLockToken).toBeNull();
+    });
+
+    it('permits benign brand comparison and generates review draft successfully', async () => {
+      const { session } = await createFixtureHierarchy();
+      const capturingProvider = {
+        providerName: 'mock',
+        generateDraft: async () => ({
+          status: 'generated' as const,
+          draft: 'Better coffee and warmer service than Starbucks down the road.',
+          model: 'mock',
+        }),
+      };
+
+      const result = await orchestrator.generateDraft(
+        db,
+        session.id,
+        {
+          clientDraftId: crypto.randomUUID(),
+          feedback: 'Better coffee and warmer service than Starbucks down the road.',
+        },
+        { provider: capturingProvider as any }
+      );
+
+      expect(result.status).toBe('generated');
+      expect(result.draft).toContain('Starbucks');
+      expect(result.generationsRemaining).toBe(2);
+    });
+
+    it('permits genuine grievance about target business and preserves negative experience', async () => {
+      const { session } = await createFixtureHierarchy();
+      const grievanceProvider = {
+        providerName: 'mock',
+        generateDraft: async () => ({
+          status: 'generated' as const,
+          draft: 'Terrible hygiene, we found a cockroach under our table.',
+          model: 'mock',
+        }),
+      };
+
+      const result = await orchestrator.generateDraft(
+        db,
+        session.id,
+        {
+          clientDraftId: crypto.randomUUID(),
+          feedback: 'Terrible hygiene, we found a cockroach under our table.',
+        },
+        { provider: grievanceProvider as any }
+      );
+
+      expect(result.status).toBe('generated');
+      expect(result.draft).toContain('cockroach');
+      expect(result.generationsRemaining).toBe(2);
+    });
   });
 });
