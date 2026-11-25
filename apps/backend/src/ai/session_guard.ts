@@ -133,7 +133,9 @@ export function canonicalizeLanguage(language: unknown): string {
 export interface SessionContext {
   sessionId: string;
   tenantId: string;
+  tenantName: string;
   locationId: string;
+  locationName: string;
   campaignId: string;
   generationsRemaining: number;
 }
@@ -173,7 +175,9 @@ export async function checkSessionAndReplay(
       s.campaign_id,
       s.expires_at,
       s.generations_remaining,
+      t.display_name AS tenant_name,
       t.status AS tenant_status,
+      l.name AS location_name,
       l.is_active AS location_is_active,
       l.google_review_url,
       c.status AS campaign_status
@@ -240,7 +244,9 @@ export async function checkSessionAndReplay(
     sessionContext: {
       sessionId: row.session_id,
       tenantId: row.tenant_id,
+      tenantName: String(row.tenant_name || ''),
       locationId: row.location_id,
+      locationName: String(row.location_name || ''),
       campaignId: row.campaign_id,
       generationsRemaining: currentQuota,
     },

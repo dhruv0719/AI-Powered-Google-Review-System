@@ -7,6 +7,7 @@ import {
 } from '@review-system/shared';
 import { MeaningfulInputValidator } from './input_validator.js';
 import { DeterministicInstructionSanitizer } from './instruction_sanitizer.js';
+import { ThirdPartyAllegationGuard } from './third_party_allegation_guard.js';
 import { PiiRedactor } from './pii_redactor.js';
 import { PromptEngine } from './prompt_engine.js';
 import { OutputValidationPipeline } from './output_validator.js';
@@ -125,6 +126,23 @@ export class AiOrchestrator {
     }
 
     const acceptedExperience = sanitizationResult.acceptedExperienceText;
+
+    // 5.5. Third-Party Allegation Guard (in-memory BEFORE lease reservation)
+    // Refuses feedback containing explicit allegations against unrelated third parties
+    const allegationCheck = ThirdPartyAllegationGuard.check(acceptedExperience, {
+      tenantName: sessionContext.tenantName,
+      locationName: sessionContext.locationName,
+    });
+
+    if (allegationCheck.isAllegationDetected) {
+      // Third-party smears consume 0 quota, 0 leases, and 0 provider calls
+      return {
+        status: 'insufficient_context',
+        draft: null,
+        generationsRemaining: sessionContext.generationsRemaining,
+        isReplay: false,
+      };
+    }
 
     // 6. Semantic input validation (in-memory on accepted experience BEFORE lease reservation)
     const validationResult = MeaningfulInputValidator.validate(
