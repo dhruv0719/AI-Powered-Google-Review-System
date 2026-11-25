@@ -9,14 +9,17 @@ export type AppDatabase = ReturnType<typeof createDatabase>;
 
 let dbInstance: AppDatabase | null = null;
 let pgliteInstance: PGlite | null = null;
+let pgClientInstance: ReturnType<typeof postgres> | null = null;
 
 export function createDatabase(connectionString?: string) {
   const env = getEnv();
   const url = connectionString || env.DATABASE_URL;
 
   if (url) {
-    const client = postgres(url, { max: 10 });
-    return drizzlePg(client, { schema });
+    if (!pgClientInstance) {
+      pgClientInstance = postgres(url, { max: 10 });
+    }
+    return drizzlePg(pgClientInstance, { schema });
   }
 
   // Fallback to in-memory PGlite for local testing
@@ -39,4 +42,28 @@ export function setTestDb(db: AppDatabase) {
 
 export function getPGliteClient(): PGlite | null {
   return pgliteInstance;
+}
+
+export function getPostgresClient(): ReturnType<typeof postgres> | null {
+  return pgClientInstance;
+}
+
+/**
+ * Gracefully terminates active database connections.
+ * Safe and idempotent: can be called repeatedly without throwing.
+ */
+export async function closeDatabase(): Promise<void> {
+  if (pgClientInstance) {
+    const client = pgClientInstance;
+    pgClientInstance = null;
+    dbInstance = null;
+    await client.end({ timeout: 5 });
+  }
+
+  if (pgliteInstance) {
+    const client = pgliteInstance;
+    pgliteInstance = null;
+    dbInstance = null;
+    await client.close();
+  }
 }

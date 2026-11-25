@@ -14,6 +14,8 @@ import { publicRoutes } from './routes/public.routes.js';
 import { feedbackRoutes } from './routes/feedback.routes.js';
 import { ErrorCodes } from '@review-system/shared';
 import { AiOrchestrator } from './ai/ai_orchestrator.js';
+import { sql } from 'drizzle-orm';
+import { getDb } from './db/index.js';
 
 export interface BuildServerOptions {
   rateLimitOverrides?: {
@@ -127,8 +129,28 @@ export function buildServer(options?: BuildServerOptions): FastifyInstance {
   // Auth context plugin
   fastify.register(authPlugin);
 
-  // Health check
+  // Liveness check (process-level liveness, does not depend on external services)
   fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
+  // Readiness check (verifies application can serve requests, including database connectivity)
+  fastify.get('/ready', async (_request, reply) => {
+    try {
+      const db = getDb();
+      await db.execute(sql`SELECT 1`);
+      return reply.status(200).send({
+        status: 'ready',
+        database: 'connected',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      _request.log.error(err, 'Readiness check failed');
+      return reply.status(503).send({
+        status: 'not_ready',
+        database: 'disconnected',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
 
   // Routes
   fastify.register(authRoutes, { prefix: '/api/v1/auth' });
