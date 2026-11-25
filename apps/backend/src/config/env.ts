@@ -34,6 +34,7 @@ const EnvSchema = z
     AI_PROVIDER: z.enum(['mock', 'groq']).default('mock'),
     AI_MODEL: z.string().default('openai/gpt-oss-20b'),
     GROQ_API_KEY: z.string().optional(),
+    INTERNAL_PROXY_SECRET: z.string().optional(),
   })
   .refine(
     (data) => {
@@ -66,6 +67,23 @@ const EnvSchema = z
     {
       message: 'SESSION_SECRET must be explicitly set to a non-default secret of at least 32 characters in production',
       path: ['SESSION_SECRET'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.NODE_ENV === 'production') {
+        const rawProxySecret = process.env.INTERNAL_PROXY_SECRET;
+        if (rawProxySecret === undefined) {
+          return false;
+        }
+        const trimmed = rawProxySecret.trim();
+        return trimmed.length >= 32;
+      }
+      return true;
+    },
+    {
+      message: 'INTERNAL_PROXY_SECRET must be explicitly set to a secret of at least 32 characters in production',
+      path: ['INTERNAL_PROXY_SECRET'],
     }
   );
 

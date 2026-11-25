@@ -48,8 +48,104 @@ export interface PublicRoutesOptions {
     sessionsPostMax?: number;
     feedbackPostMax?: number;
     generateDraftMax?: number;
+    sessionFeedbackMax?: number;
+    sessionDraftMax?: number;
   };
   aiOrchestrator?: AiOrchestrator;
+  sessionRateLimiter?: BoundedSessionRateLimiter;
+}
+
+interface RateLimitBucket {
+  count: number;
+  resetAt: number;
+}
+
+/**
+ * High-performance, bounded in-memory rate limiter for Layer 2 customer session rate-limiting.
+ * Persists session quotas across IP address rotation while bounding memory consumption (LRU eviction).
+ */
+export class BoundedSessionRateLimiter {
+  private readonly store = new Map<string, RateLimitBucket>();
+  private readonly maxKeys: number;
+  private readonly windowMs: number;
+
+  constructor(options?: { maxKeys?: number; windowMs?: number }) {
+    this.maxKeys = options?.maxKeys ?? 10_000;
+    this.windowMs = options?.windowMs ?? 60_000;
+  }
+
+  public checkAndIncrement(
+    key: string,
+    limit: number
+  ): { allowed: boolean; retryAfterSeconds: number; remaining: number } {
+    if (limit <= 0) {
+      return {
+        allowed: false,
+        retryAfterSeconds: Math.ceil(this.windowMs / 1000),
+        remaining: 0,
+      };
+    }
+
+    const now = Date.now();
+    const entry = this.store.get(key);
+
+    if (entry && now < entry.resetAt) {
+      if (entry.count >= limit) {
+        return {
+          allowed: false,
+          retryAfterSeconds: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)),
+          remaining: 0,
+        };
+      }
+      entry.count += 1;
+      return {
+        allowed: true,
+        retryAfterSeconds: 0,
+        remaining: limit - entry.count,
+      };
+    }
+
+    if (this.store.size >= this.maxKeys && !this.store.has(key)) {
+      this.evict();
+    }
+
+    this.store.set(key, {
+      count: 1,
+      resetAt: now + this.windowMs,
+    });
+
+    return {
+      allowed: true,
+      retryAfterSeconds: 0,
+      remaining: limit - 1,
+    };
+  }
+
+  private evict(): void {
+    const now = Date.now();
+    for (const [k, v] of this.store.entries()) {
+      if (now >= v.resetAt) {
+        this.store.delete(k);
+      }
+    }
+    if (this.store.size >= this.maxKeys) {
+      const toDelete = Math.max(1, Math.floor(this.maxKeys * 0.1));
+      let count = 0;
+      for (const k of this.store.keys()) {
+        this.store.delete(k);
+        count++;
+        if (count >= toDelete) break;
+      }
+    }
+  }
+
+  public clear(): void {
+    this.store.clear();
+  }
+
+  public get size(): number {
+    return this.store.size;
+  }
 }
 
 export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
@@ -63,6 +159,15 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
   const sessionsPostMax = opts?.rateLimitOverrides?.sessionsPostMax ?? (isTest ? 1000 : 30);
   const feedbackPostMax = opts?.rateLimitOverrides?.feedbackPostMax ?? (isTest ? 1000 : 10);
   const generateDraftMax = opts?.rateLimitOverrides?.generateDraftMax ?? (isTest ? 1000 : 10);
+  const sessionFeedbackMax =
+    opts?.rateLimitOverrides?.sessionFeedbackMax ??
+    opts?.rateLimitOverrides?.feedbackPostMax ??
+    (isTest ? 1000 : 5);
+  const sessionDraftMax =
+    opts?.rateLimitOverrides?.sessionDraftMax ??
+    opts?.rateLimitOverrides?.generateDraftMax ??
+    (isTest ? 1000 : 5);
+  const sessionRateLimiter = opts?.sessionRateLimiter ?? new BoundedSessionRateLimiter();
   const aiOrchestrator = opts?.aiOrchestrator ?? new AiOrchestrator();
 
   // 1. Read-only Public QR Resolution (ZERO writes, ZERO session generation)
@@ -73,6 +178,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
         rateLimit: {
           max: qrGetMax,
           timeWindow: '1 minute',
+          keyGenerator: (req: FastifyRequest) => `qr:ip:${req.clientIp}`,
         },
       },
     },
@@ -201,6 +307,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
         rateLimit: {
           max: sessionsPostMax,
           timeWindow: '1 minute',
+          keyGenerator: (req: FastifyRequest) => `sessions:ip:${req.clientIp}`,
         },
       },
     },
@@ -351,7 +458,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
   );
 
   // 3. Isolated Private Customer Feedback Submission
-  fastify.post(
+  fastify.post<{ Params: { code: string } }>(
     '/qr/:code/feedback',
     {
       bodyLimit: 16384, // 16 KB payload ceiling protects against payload stuffing / memory exhaustion
@@ -359,7 +466,27 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
         rateLimit: {
           max: feedbackPostMax,
           timeWindow: '1 minute',
+          keyGenerator: (req: FastifyRequest) => `feedback:ip:${req.clientIp}`,
         },
+      },
+      preHandler: async (request: FastifyRequest, reply: FastifyReply) => {
+        const rawToken = request.cookies?.[CustomerSessionConstants.COOKIE_NAME];
+        if (rawToken) {
+          const tokenHash = hashSessionToken(rawToken);
+          const check = sessionRateLimiter.checkAndIncrement(
+            `session:feedback:${tokenHash}`,
+            sessionFeedbackMax
+          );
+          if (!check.allowed) {
+            reply.header('Retry-After', check.retryAfterSeconds);
+            return reply.status(429).send({
+              error: {
+                code: ErrorCodes.RATE_LIMITED,
+                message: 'Too many requests for this session. Please try again later.',
+              },
+            });
+          }
+        }
       },
     },
     async (
@@ -778,7 +905,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
   }
 
   // 4. Public AI Review Draft Generation
-  fastify.post(
+  fastify.post<{ Params: { code: string } }>(
     '/qr/:code/generate-draft',
     {
       bodyLimit: 16384, // 16 KB strict route-specific body limit
@@ -786,7 +913,27 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
         rateLimit: {
           max: generateDraftMax,
           timeWindow: '1 minute',
+          keyGenerator: (req: FastifyRequest) => `draft:ip:${req.clientIp}`,
         },
+      },
+      preHandler: async (request: FastifyRequest, reply: FastifyReply) => {
+        const rawToken = request.cookies?.[CustomerSessionConstants.COOKIE_NAME];
+        if (rawToken) {
+          const tokenHash = hashSessionToken(rawToken);
+          const check = sessionRateLimiter.checkAndIncrement(
+            `session:draft:${tokenHash}`,
+            sessionDraftMax
+          );
+          if (!check.allowed) {
+            reply.header('Retry-After', check.retryAfterSeconds);
+            return reply.status(429).send({
+              error: {
+                code: ErrorCodes.RATE_LIMITED,
+                message: 'Too many requests for this session. Please try again later.',
+              },
+            });
+          }
+        }
       },
     },
     async (

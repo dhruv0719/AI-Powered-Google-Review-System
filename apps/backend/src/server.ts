@@ -16,6 +16,105 @@ import { ErrorCodes } from '@review-system/shared';
 import { AiOrchestrator } from './ai/ai_orchestrator.js';
 import { sql } from 'drizzle-orm';
 import { getDb } from './db/index.js';
+import crypto from 'crypto';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    clientIp: string;
+  }
+}
+
+/**
+ * Validates whether a given string is a syntactically valid IPv4 or IPv6 address
+ */
+export function isValidIp(ip?: string | null): boolean {
+  if (!ip || typeof ip !== 'string') return false;
+  const trimmed = ip.trim();
+
+  // IPv4 check: 4 decimal octets (0-255) without leading zeroes
+  const ipv4Parts = trimmed.split('.');
+  if (ipv4Parts.length === 4) {
+    for (const part of ipv4Parts) {
+      if (!/^\d+$/.test(part)) return false;
+      if (part.length > 1 && part.startsWith('0')) return false;
+      const num = Number(part);
+      if (num < 0 || num > 255) return false;
+    }
+    return true;
+  }
+
+  // IPv6 check: 16-bit hex colon groups with optional '::' compression
+  if (trimmed.includes(':')) {
+    if (trimmed.includes(':::')) return false;
+    const doubleColons = trimmed.split('::');
+    if (doubleColons.length > 2) return false;
+    if (doubleColons.length === 1) {
+      if (trimmed.startsWith(':') || trimmed.endsWith(':')) return false;
+      const parts = trimmed.split(':');
+      if (parts.length !== 8) return false;
+      for (const part of parts) {
+        if (!/^[0-9a-fA-F]{1,4}$/.test(part)) return false;
+      }
+      return true;
+    } else {
+      const [left, right] = doubleColons;
+      if (left.endsWith(':') || right.startsWith(':')) return false;
+      if (left.startsWith(':') && left !== '') return false;
+      if (right.endsWith(':') && right !== '') return false;
+      const leftParts = left === '' ? [] : left.split(':');
+      const rightParts = right === '' ? [] : right.split(':');
+      const totalParts = leftParts.length + rightParts.length;
+      if (totalParts >= 8) return false;
+      for (const part of [...leftParts, ...rightParts]) {
+        if (!/^[0-9a-fA-F]{1,4}$/.test(part)) return false;
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Constant-time comparison for proxy authentication secrets using SHA-256 digests
+ * to prevent secret length leaking via timing differences.
+ */
+export function safeCompareSecret(a?: string | string[], b?: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const hashA = crypto.createHash('sha256').update(a).digest();
+  const hashB = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
+/**
+ * Strict, unambiguous health endpoint exemption filter.
+ * Only exact GET/HEAD requests to /health and /ready are permitted to bypass proxy assertion.
+ * Resistant to path manipulation, percent-encoding, dot-segments, trailing slashes, and duplicate slashes.
+ */
+export function isExemptHealthRoute(method: string, rawUrl: string): boolean {
+  const upperMethod = method.toUpperCase();
+  if (upperMethod !== 'GET' && upperMethod !== 'HEAD') {
+    return false;
+  }
+  const qIdx = rawUrl.indexOf('?');
+  const hIdx = rawUrl.indexOf('#');
+  let endIdx = rawUrl.length;
+  if (qIdx !== -1) endIdx = Math.min(endIdx, qIdx);
+  if (hIdx !== -1) endIdx = Math.min(endIdx, hIdx);
+  const rawPath = rawUrl.slice(0, endIdx);
+
+  if (rawPath !== '/health' && rawPath !== '/ready') {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(rawUrl, 'http://127.0.0.1');
+    const decodedPath = decodeURIComponent(parsed.pathname);
+    return decodedPath === '/health' || decodedPath === '/ready';
+  } catch {
+    return false;
+  }
+}
 
 export interface BuildServerOptions {
   rateLimitOverrides?: {
@@ -23,6 +122,8 @@ export interface BuildServerOptions {
     sessionsPostMax?: number;
     feedbackPostMax?: number;
     generateDraftMax?: number;
+    sessionFeedbackMax?: number;
+    sessionDraftMax?: number;
   };
   aiOrchestrator?: AiOrchestrator;
 }
@@ -54,10 +155,71 @@ export function buildServer(options?: BuildServerOptions): FastifyInstance {
           'body.customer_contact',
           'headers.cookie',
           'res.body.draft',
+          'req.headers["x-proxy-secret"]',
+          'req.headers.x-proxy-secret',
+          'headers["x-proxy-secret"]',
+          'headers.x-proxy-secret',
         ],
         censor: '[REDACTED]',
       },
     },
+  });
+
+  // Dedicated request decoration for verified client IP
+  fastify.decorateRequest('clientIp', '');
+
+  // Authenticated proxy identity assertion verification
+  fastify.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+    const incomingProxySecret = request.headers['x-proxy-secret'];
+    const incomingForwardedIp = request.headers['x-forwarded-client-ip'];
+    const currentEnv = getEnv();
+    const configuredSecret = currentEnv.INTERNAL_PROXY_SECRET;
+    const isProduction = currentEnv.NODE_ENV === 'production';
+
+    if (configuredSecret) {
+      const secretMatches = safeCompareSecret(incomingProxySecret, configuredSecret);
+
+      if (secretMatches) {
+        if (typeof incomingForwardedIp === 'string' && isValidIp(incomingForwardedIp)) {
+          request.clientIp = incomingForwardedIp.trim();
+          return;
+        }
+        request.log.warn({ ip: incomingForwardedIp }, 'Malformed forwarded client IP assertion');
+        return reply.status(400).send({
+          error: {
+            code: ErrorCodes.VALIDATION_ERROR,
+            message: 'Malformed or missing forwarded client IP assertion',
+          },
+        });
+      }
+
+      // Proxy secret was sent but did not match
+      if (incomingProxySecret !== undefined) {
+        request.log.warn('Invalid proxy secret received');
+        return reply.status(403).send({
+          error: {
+            code: ErrorCodes.FORBIDDEN,
+            message: 'Invalid proxy identity assertion',
+          },
+        });
+      }
+
+      // In production, reject any direct access without valid proxy assertion
+      // except explicitly designated health check endpoints (/health and /ready)
+      if (isProduction && !isExemptHealthRoute(request.method, request.url)) {
+        request.log.warn({ method: request.method, url: request.url }, 'Direct access rejected in production without proxy identity');
+        return reply.status(403).send({
+          error: {
+            code: ErrorCodes.FORBIDDEN,
+            message: 'Direct API access without proxy identity is forbidden',
+          },
+        });
+      }
+    }
+
+    // Default / fallback: use Fastify's socket remoteAddress (request.ip),
+    // strictly ignoring any untrusted client-supplied X-Forwarded-Client-IP!
+    request.clientIp = request.ip;
   });
 
   // Security headers
