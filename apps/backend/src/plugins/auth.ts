@@ -5,6 +5,7 @@ import { getDb } from '../db/index.js';
 import { sessions, users, tenants, tenantMemberships } from '../drizzle/schema.js';
 import { hashSessionToken } from '../utils/crypto.js';
 import { AuthConstants, ErrorCodes, Role, TenantStatus } from '@review-system/shared';
+import { getEnv } from '../config/env.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -104,39 +105,71 @@ const authPlugin: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         return;
       }
 
-      const host = request.headers.host;
-      if (!host) {
-        reply.status(403).send({
-          error: {
-            code: ErrorCodes.FORBIDDEN,
-            message: 'Host header missing',
-          },
-        });
-        return;
-      }
-
       try {
         const originUrl = new URL(originHeader);
-        const normalizedOriginHost = originUrl.host.replace(/:(80|443)$/, '');
-        const normalizedTargetHost = host.replace(/:(80|443)$/, '');
+        const requestOrigin = originUrl.origin;
+        const env = getEnv();
 
-        // Host mismatch (including port mismatch)
-        if (normalizedOriginHost !== normalizedTargetHost) {
-          reply.status(403).send({
-            error: {
-              code: ErrorCodes.FORBIDDEN,
-              message: 'Cross-Site Request Forgery blocked: host mismatch',
-            },
-          });
-          return;
+        // 1. Build canonical trusted origins set
+        const trustedOrigins = new Set<string>();
+
+        // Canonical frontend origin
+        if (env.PUBLIC_WEB_URL) {
+          try {
+            trustedOrigins.add(new URL(env.PUBLIC_WEB_URL).origin);
+          } catch {
+            trustedOrigins.add(env.PUBLIC_WEB_URL);
+          }
         }
 
-        // Scheme mismatch check (e.g. http origin vs https request or vice versa)
-        if (request.protocol && originUrl.protocol !== `${request.protocol}:`) {
+        // Additional explicitly allowed origins
+        if (env.ALLOWED_ORIGINS) {
+          for (const rawOrigin of env.ALLOWED_ORIGINS.split(',')) {
+            const trimmed = rawOrigin.trim();
+            if (trimmed) {
+              try {
+                trustedOrigins.add(new URL(trimmed).origin);
+              } catch {
+                trustedOrigins.add(trimmed);
+              }
+            }
+          }
+        }
+
+        // 2. Direct same-host check (when frontend and backend share the exact host/scheme/port)
+        const host = request.headers.host;
+        let isDirectHostMatch = false;
+        let hasHostMismatch = false;
+        let hasSchemeMismatch = false;
+
+        if (host) {
+          const normalizedOriginHost = originUrl.host.replace(/:(80|443)$/, '');
+          const normalizedTargetHost = host.replace(/:(80|443)$/, '');
+          const isSameHost = normalizedOriginHost === normalizedTargetHost;
+          const isSameScheme = request.protocol ? originUrl.protocol === `${request.protocol}:` : true;
+          if (isSameHost && isSameScheme) {
+            isDirectHostMatch = true;
+          } else if (!isSameHost) {
+            hasHostMismatch = true;
+          } else if (!isSameScheme) {
+            hasSchemeMismatch = true;
+          }
+        }
+
+        const isTrusted = isDirectHostMatch || trustedOrigins.has(requestOrigin);
+
+        if (!isTrusted) {
+          let message = 'Cross-Site Request Forgery blocked: untrusted origin';
+          if (hasHostMismatch) {
+            message = 'Cross-Site Request Forgery blocked: host mismatch';
+          } else if (hasSchemeMismatch) {
+            message = 'Cross-Site Request Forgery blocked: scheme mismatch';
+          }
+
           reply.status(403).send({
             error: {
               code: ErrorCodes.FORBIDDEN,
-              message: 'Cross-Site Request Forgery blocked: scheme mismatch',
+              message,
             },
           });
           return;
