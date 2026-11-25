@@ -70,6 +70,10 @@ export class OutputValidationPipeline {
   private static readonly PROHIBITED_URL_REGEX =
     /(?:https?|ftp):\/\/[^\s]+|\bwww\.[^\s]+|\b[a-z0-9-]+(?:\.com|\.org|\.net|\.io|\.co|\.in)\b/i;
 
+  // Residual Instruction Leakage & Command Echoes
+  private static readonly INSTRUCTION_LEAKAGE_REGEX =
+    /(?:\[(?:ADMIN(?:_COMMAND)?|SYSTEM(?:_NOTICE)?|DEVELOPER(?:_OVERRIDE)?|OVERRIDE|COMMAND|आदेश)[^\]]*\]|<\/?(?:system|developer|assistant|instructions?|admin|override)\b[^>]*>|\b(?:disregard\s+(?:editing|all\s+rules|instructions)|ignore\s+all\s+(?:previous\s+)?instructions|write\s+(?:a\s+)?(?:glowing\s+)?(?:5|five)[\s-]star\s+review|also\s+write\s+that\s+they\s+offer|em\s+lakho\s+ke\s+badha\s+bau\s+sara|review\s+ma\s+lakho\s+ke\s+VIP|badhi\s+rules\s+bhuli\s+jao|pichhle\s+sabhi\s+niyam\s+bhool\s+jao)\b)/i;
+
   // Sentiment Lexicons
   private static readonly GRIEVANCE_WORDS = [
     'terrible', 'awful', 'worst', 'rude', 'dirty', 'horrible', 'disaster', 'poor', 'bad',
@@ -176,7 +180,16 @@ export class OutputValidationPipeline {
       };
     }
 
-    // 5. Numeric and Unit Grounding
+    // 5. Residual Instruction Leakage Check
+    if (this.INSTRUCTION_LEAKAGE_REGEX.test(draft)) {
+      return {
+        isValid: false,
+        reasonCode: 'INSTRUCTION_LEAKAGE_DETECTED',
+        message: 'Draft contains an unresolved instruction or command phrase',
+      };
+    }
+
+    // 6. Numeric and Unit Grounding
     const sourceEntities = this.extractNumericEntities(sanitizedSourceText);
     const draftEntities = this.extractNumericEntities(draft);
 

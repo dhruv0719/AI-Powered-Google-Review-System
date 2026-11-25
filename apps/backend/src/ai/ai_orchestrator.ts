@@ -6,6 +6,7 @@ import {
   AiAssistantConstants,
 } from '@review-system/shared';
 import { MeaningfulInputValidator } from './input_validator.js';
+import { DeterministicInstructionSanitizer } from './instruction_sanitizer.js';
 import { PiiRedactor } from './pii_redactor.js';
 import { PromptEngine } from './prompt_engine.js';
 import { OutputValidationPipeline } from './output_validator.js';
@@ -103,9 +104,31 @@ export class AiOrchestrator {
 
     const sessionContext = replayCheck.sessionContext!;
 
-    // 5. Semantic input validation (in-memory BEFORE lease reservation)
-    const validationResult = MeaningfulInputValidator.validate(
+    // 5. Deterministic Instruction Sanitization (in-memory BEFORE lease reservation)
+    const sanitizationResult = DeterministicInstructionSanitizer.sanitize(
       input.feedback,
+      canonicalLanguage
+    );
+
+    if (
+      sanitizationResult.category === 'INSUFFICIENT_CONTEXT' ||
+      sanitizationResult.category === 'AMBIGUOUS' ||
+      !sanitizationResult.acceptedExperienceText
+    ) {
+      // Instruction-only, attack-only, or ambiguous inputs consume 0 quota and 0 leases
+      return {
+        status: 'insufficient_context',
+        draft: null,
+        generationsRemaining: sessionContext.generationsRemaining,
+        isReplay: false,
+      };
+    }
+
+    const acceptedExperience = sanitizationResult.acceptedExperienceText;
+
+    // 6. Semantic input validation (in-memory on accepted experience BEFORE lease reservation)
+    const validationResult = MeaningfulInputValidator.validate(
+      acceptedExperience,
       canonicalLanguage
     );
 
@@ -116,23 +139,23 @@ export class AiOrchestrator {
 
       // Semantic failures (too short, low diversity, spam, mash) consume 0 quota and 0 leases
       return {
-        status: 'insufficient_context' ,
+        status: 'insufficient_context',
         draft: null,
-        generationsRemaining: sessionContext.generationsRemaining,  
+        generationsRemaining: sessionContext.generationsRemaining,
         isReplay: false,
       };
     }
 
-    // 6. PII Redaction
-    const redactionResult = PiiRedactor.redact(input.feedback);
-    const sanitizedFeedback = redactionResult.sanitizedText;
+    // 7. PII Redaction (strictly on accepted customer experience)
+    const redactionResult = PiiRedactor.redact(acceptedExperience);
+    const sanitizedExperience = redactionResult.sanitizedText;
 
-    // 7. Phase 1: Atomic Lease Reservation (30 seconds via clock_timestamp)
+    // 8. Phase 1: Atomic Lease Reservation (30 seconds via clock_timestamp)
     const lockToken = crypto.randomUUID();
     const reservation = await reserveSessionLease(db, sessionId, lockToken);
     const expectedQuota = reservation.generationsRemaining;
 
-    // 8. Provider Execution & Output Guardrails (Protected by lease)
+    // 9. Provider Execution & Output Guardrails (Protected by lease)
     let draftText: string;
     const provider = options?.provider ?? this.defaultProvider;
     const timeoutMs =
@@ -141,7 +164,7 @@ export class AiOrchestrator {
 
     try {
       const promptMessages = PromptEngine.buildPromptMessages(
-        sanitizedFeedback,
+        sanitizedExperience,
         canonicalLanguage
       );
 
@@ -170,10 +193,10 @@ export class AiOrchestrator {
         };
       }
 
-      // 9. Output Guardrail Validation
+      // 10. Output Guardrail Validation (grounded strictly against accepted experience)
       const guardrailResult = OutputValidationPipeline.validate(
         aiResult.draft,
-        sanitizedFeedback
+        sanitizedExperience
       );
 
       if (!guardrailResult.isValid) {

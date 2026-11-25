@@ -44,7 +44,8 @@ export interface OutputValidationFailure {
     | 'SENTIMENT_INVERSION_DETECTED'
     | 'META_TEXT_DETECTED'
     | 'PROHIBITED_URL_DETECTED'
-    | 'PROHIBITED_PLACEHOLDER_LEAK';
+    | 'PROHIBITED_PLACEHOLDER_LEAK'
+    | 'INSTRUCTION_LEAKAGE_DETECTED';
   message: string;
 }
 
