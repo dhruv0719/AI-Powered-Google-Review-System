@@ -68,9 +68,54 @@ export function buildServer(options?: BuildServerOptions): FastifyInstance {
     global: false,
   });
 
-  // CORS
+  // CORS: Restrict credentialed cross-origin requests to explicitly configured trusted origins
+  const configuredOrigins = new Set<string>();
+  if (env.PUBLIC_WEB_URL) {
+    try {
+      configuredOrigins.add(new URL(env.PUBLIC_WEB_URL).origin);
+    } catch {
+      configuredOrigins.add(env.PUBLIC_WEB_URL);
+    }
+  }
+  // In test environment, also trust default localhost test origins
+  if (env.NODE_ENV === 'test') {
+    configuredOrigins.add('http://localhost');
+    configuredOrigins.add('http://127.0.0.1');
+  }
+  if (env.ALLOWED_ORIGINS) {
+    for (const rawOrigin of env.ALLOWED_ORIGINS.split(',')) {
+      const trimmed = rawOrigin.trim();
+      if (trimmed) {
+        try {
+          configuredOrigins.add(new URL(trimmed).origin);
+        } catch {
+          configuredOrigins.add(trimmed);
+        }
+      }
+    }
+  }
+
   fastify.register(fastifyCors, {
-    origin: true,
+    origin: (origin, cb) => {
+      // In development/test with no explicit origin (like curl/server-to-server), permit
+      if (!origin) {
+        cb(null, true);
+        return;
+      }
+      try {
+        const reqOrigin = new URL(origin).origin;
+        if (configuredOrigins.has(reqOrigin)) {
+          cb(null, true);
+          return;
+        }
+      } catch {
+        // Malformed origin
+      }
+      // When origin is untrusted, return false (do not set Access-Control-Allow-Origin).
+      // Returning false instead of an Error allows downstream preHandlers (like CSRF validators)
+      // to handle the request with proper 403 status codes instead of throwing unhandled 500s.
+      cb(null, false);
+    },
     credentials: true,
   });
 

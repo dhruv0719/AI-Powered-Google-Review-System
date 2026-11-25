@@ -339,6 +339,7 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
         httpOnly: true,
         secure: env.COOKIE_SECURE,
         sameSite: 'lax',
+        domain: env.COOKIE_DOMAIN,
         maxAge: CustomerSessionConstants.SESSION_TTL_MINUTES * 60,
       });
 

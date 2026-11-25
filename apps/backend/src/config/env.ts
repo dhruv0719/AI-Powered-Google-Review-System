@@ -16,9 +16,15 @@ const EnvSchema = z
     COOKIE_DOMAIN: z.string().optional(),
     COOKIE_SECURE: z
       .string()
-      .default('false')
-      .transform((val) => val === 'true'),
+      .optional()
+      .transform((val) => {
+        if (val !== undefined && val.trim().length > 0) {
+          return val.trim().toLowerCase() === 'true';
+        }
+        return process.env.NODE_ENV === 'production';
+      }),
     PUBLIC_WEB_URL: z.string().default('http://localhost:5173'),
+    ALLOWED_ORIGINS: z.string().optional(),
     TRUSTED_PROXIES: z.string().default('127.0.0.1,::1'),
     ENABLE_AI_ASSISTANT: z
       .string()
@@ -39,6 +45,27 @@ const EnvSchema = z
     {
       message: 'GROQ_API_KEY is required when AI_PROVIDER is set to "groq"',
       path: ['GROQ_API_KEY'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.NODE_ENV === 'production') {
+        const rawSecret = process.env.SESSION_SECRET;
+        if (rawSecret === undefined) {
+          return false;
+        }
+        const trimmedSecret = rawSecret.trim();
+        const DEFAULT_SECRET = 'super-secret-session-key-must-be-at-least-32-chars-long!';
+        return (
+          trimmedSecret.length >= 32 &&
+          trimmedSecret !== DEFAULT_SECRET
+        );
+      }
+      return true;
+    },
+    {
+      message: 'SESSION_SECRET must be explicitly set to a non-default secret of at least 32 characters in production',
+      path: ['SESSION_SECRET'],
     }
   );
 

@@ -270,10 +270,16 @@ export const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
   // 3. Logout
   fastify.post('/logout', { preHandler: [requireAuth] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const db = getDb();
+    const env = getEnv();
     if (request.session) {
       await db.delete(sessions).where(eq(sessions.tokenHash, request.session.tokenHash));
     }
-    reply.clearCookie(AuthConstants.COOKIE_NAME, { path: '/' });
+    reply.clearCookie(AuthConstants.COOKIE_NAME, {
+      path: '/',
+      domain: env.COOKIE_DOMAIN,
+      secure: env.COOKIE_SECURE,
+      sameSite: 'lax',
+    });
     return reply.status(200).send({ status: 'logged_out' });
   });
 
