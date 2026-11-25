@@ -65,7 +65,8 @@ export function createErrorResponse(
       status,
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Cache-Control': 'no-store, private',
+        Pragma: 'no-cache',
       },
     }
   );
@@ -210,6 +211,11 @@ export function filterResponseHeaders(upstreamHeaders: Headers): Headers {
       continue;
     }
 
+    // Strip Server header to prevent leaking upstream infrastructure details
+    if (lowerKey === 'server') {
+      continue;
+    }
+
     if (HOP_BY_HOP_HEADERS.has(lowerKey) || customHopByHop.has(lowerKey)) {
       continue;
     }
@@ -221,6 +227,10 @@ export function filterResponseHeaders(upstreamHeaders: Headers): Headers {
   for (const cookie of setCookies) {
     responseHeaders.append('set-cookie', cookie);
   }
+
+  // Enforce API response cache isolation for all proxied API responses
+  responseHeaders.set('Cache-Control', 'no-store, private');
+  responseHeaders.set('Pragma', 'no-cache');
 
   return responseHeaders;
 }
@@ -271,6 +281,7 @@ export const onRequest: PagesFunction<PagesEnv> = async (context) => {
     method,
     headers: filterForwardHeaders(request.headers),
     redirect: 'manual',
+    cache: 'no-store',
   };
 
   if (hasBody && request.body) {

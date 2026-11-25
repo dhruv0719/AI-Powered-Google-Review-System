@@ -214,10 +214,12 @@ describe('Cloudflare Pages API Proxy Implementation (Phase 8.4.3)', () => {
       const filtered = filterResponseHeaders(headers);
       expect(filtered.get('content-type')).toBe('application/json');
 
-      if (typeof (filtered as any).getSetCookie === 'function') {
-        const returnedCookies = (filtered as any).getSetCookie();
-        expect(returnedCookies.length).toBe(2);
-      }
+      const returnedCookies = extractSetCookies(filtered);
+      expect(returnedCookies.length).toBe(2);
+      expect(returnedCookies[0]).toBe(
+        'session_id=sess_abc123; Path=/; HttpOnly; SameSite=Lax; Secure'
+      );
+      expect(returnedCookies[1]).toBe('csrf_token=csrf_xyz789; Path=/; SameSite=Lax');
     });
 
     it('preserves multiple Set-Cookie headers using getAll fallback if getSetCookie is absent', () => {
@@ -238,21 +240,30 @@ describe('Cloudflare Pages API Proxy Implementation (Phase 8.4.3)', () => {
         'session_id=sess_one; Path=/',
         'session_id_two=sess_two; Path=/',
       ]);
+
+      const filtered = filterResponseHeaders(headers);
+      const returnedCookies = extractSetCookies(filtered);
+      expect(returnedCookies.length).toBe(2);
+      expect(returnedCookies[0]).toBe('session_id=sess_one; Path=/');
+      expect(returnedCookies[1]).toBe('session_id_two=sess_two; Path=/');
     });
 
-    it('strips hop-by-hop headers from upstream response', () => {
+    it('strips hop-by-hop and server headers and enforces cache isolation on upstream response', () => {
       const headers = new Headers({
         connection: 'close',
         'transfer-encoding': 'chunked',
+        server: 'Render',
         'content-type': 'application/json',
-        'cache-control': 'private, no-cache',
+        'cache-control': 'public, max-age=3600',
       });
 
       const filtered = filterResponseHeaders(headers);
       expect(filtered.get('connection')).toBeNull();
       expect(filtered.get('transfer-encoding')).toBeNull();
+      expect(filtered.get('server')).toBeNull();
       expect(filtered.get('content-type')).toBe('application/json');
-      expect(filtered.get('cache-control')).toBe('private, no-cache');
+      expect(filtered.get('cache-control')).toBe('no-store, private');
+      expect(filtered.get('pragma')).toBe('no-cache');
     });
   });
 
@@ -455,7 +466,8 @@ describe('Cloudflare Pages API Proxy Implementation (Phase 8.4.3)', () => {
 
       expect(res.status).toBe(502);
       expect(res.headers.get('content-type')).toContain('application/json');
-      expect(res.headers.get('cache-control')).toContain('no-store');
+      expect(res.headers.get('cache-control')).toBe('no-store, private');
+      expect(res.headers.get('pragma')).toBe('no-cache');
 
       const data = await res.json();
       expect(data).toEqual({
@@ -574,6 +586,200 @@ describe('Cloudflare Pages API Proxy Implementation (Phase 8.4.3)', () => {
       expect(forwardedHeaders.get('host')).toBeNull();
       expect(forwardedHeaders.get('origin')).toBe('https://my-saas.pages.dev');
     });
+
+    it('preserves multiple distinct Set-Cookie headers end-to-end through onRequest', async () => {
+      const cookie1 =
+        'merchant_session=sess_sec123; Path=/; HttpOnly; SameSite=Lax; Secure';
+      const cookie2 = 'csrf_token=csrf_tok456; Path=/; SameSite=Lax';
+
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        const upstreamHeaders = new Headers({
+          'content-type': 'application/json',
+        });
+        upstreamHeaders.append('set-cookie', cookie1);
+        upstreamHeaders.append('set-cookie', cookie2);
+
+        return new Response(JSON.stringify({ authenticated: true }), {
+          status: 200,
+          headers: upstreamHeaders,
+        });
+      });
+
+      const clientReq = new Request('https://my-saas.pages.dev/api/v1/auth/login', {
+        method: 'POST',
+        headers: {
+          origin: 'https://my-saas.pages.dev',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ email: 'user@example.com', password: 'password123' }),
+      });
+
+      const context = createMockContext(clientReq);
+      const res = await onRequest(context);
+
+      expect(res.status).toBe(200);
+
+      const returnedCookies = extractSetCookies(res.headers);
+      expect(returnedCookies.length).toBe(2);
+
+      // Verify cookies remain separate and are not lost
+      expect(returnedCookies[0]).toBe(cookie1);
+      expect(returnedCookies[1]).toBe(cookie2);
+
+      // Verify neither cookie is comma-concatenated into the other
+      expect(returnedCookies[0]).not.toContain(cookie2);
+      expect(returnedCookies[1]).not.toContain(cookie1);
+
+      // Verify security attributes are preserved
+      expect(returnedCookies[0]).toContain('Path=/');
+      expect(returnedCookies[0]).toContain('HttpOnly');
+      expect(returnedCookies[0]).toContain('Secure');
+      expect(returnedCookies[0]).toContain('SameSite=Lax');
+      expect(returnedCookies[1]).toContain('SameSite=Lax');
+    });
+
+    it('preserves multiple Set-Cookie headers end-to-end through onRequest using Cloudflare getAll fallback', async () => {
+      const cookie1 = 'customer_session=c_sess_789; Path=/api/v1/public/qr/code1; HttpOnly; Secure; SameSite=Lax';
+      const cookie2 = 'client_marker=marker_val; Path=/api/v1/public/qr/code1; SameSite=Lax';
+
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        const upstreamHeaders = new Headers({
+          'content-type': 'application/json',
+        });
+        const upstreamRes = new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: upstreamHeaders,
+        });
+        (upstreamRes.headers as any).getSetCookie = undefined;
+        (upstreamRes.headers as any).getAll = (name: string) => {
+          if (name.toLowerCase() === 'set-cookie') return [cookie1, cookie2];
+          return [];
+        };
+        return upstreamRes;
+      });
+
+      const clientReq = new Request('https://my-saas.pages.dev/api/v1/public/qr/code1/sessions', {
+        method: 'POST',
+        headers: { origin: 'https://my-saas.pages.dev' },
+      });
+
+      const context = createMockContext(clientReq);
+      const res = await onRequest(context);
+
+      expect(res.status).toBe(200);
+
+      const returnedCookies = extractSetCookies(res.headers);
+      expect(returnedCookies.length).toBe(2);
+      expect(returnedCookies[0]).toBe(cookie1);
+      expect(returnedCookies[1]).toBe(cookie2);
+      expect(returnedCookies[0]).not.toContain(cookie2);
+      expect(returnedCookies[1]).not.toContain(cookie1);
+      expect(returnedCookies[0]).toContain('HttpOnly');
+      expect(returnedCookies[0]).toContain('Secure');
+    });
+
+    it('strips upstream Server header from final proxy response', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            server: 'Render',
+          },
+        });
+      });
+
+      const clientReq = new Request('https://my-saas.pages.dev/api/v1/test', {
+        method: 'GET',
+      });
+
+      const context = createMockContext(clientReq);
+      const res = await onRequest(context);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('server')).toBeNull();
+    });
+
+    it('enforces Cache-Control: no-store, private and Pragma: no-cache across all HTTP status codes (200, 204, 302, 304, 400, 401, 429, 500)', async () => {
+      const statusCodes = [200, 204, 302, 304, 400, 401, 429, 500];
+
+      for (const status of statusCodes) {
+        globalThis.fetch = vi.fn().mockImplementation(async () => {
+          const headers: Record<string, string> = {
+            'content-type': 'application/json',
+          };
+          if (status === 302) {
+            headers.location = '/login';
+          }
+          const body = (status === 204 || status === 304) ? null : JSON.stringify({ status });
+          return new Response(body, {
+            status,
+            headers,
+          });
+        });
+
+        const clientReq = new Request('https://my-saas.pages.dev/api/v1/test', {
+          method: 'GET',
+        });
+
+        const context = createMockContext(clientReq);
+        const res = await onRequest(context);
+
+        expect(res.status).toBe(status);
+        expect(res.headers.get('cache-control')).toBe('no-store, private');
+        expect(res.headers.get('pragma')).toBe('no-cache');
+      }
+    });
+
+    it('enforces Cache-Control: no-store, private and Pragma: no-cache on proxy-generated 502, 404, and 400 errors', async () => {
+      // 1. Upstream network failure -> 502
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Connection failed'));
+      const netFailReq = new Request('https://my-saas.pages.dev/api/v1/auth/me', { method: 'GET' });
+      const netFailRes = await onRequest(createMockContext(netFailReq));
+      expect(netFailRes.status).toBe(502);
+      expect(netFailRes.headers.get('cache-control')).toBe('no-store, private');
+      expect(netFailRes.headers.get('pragma')).toBe('no-cache');
+
+      // 2. Missing BACKEND_URL -> 502
+      const missingEnvRes = await onRequest(createMockContext(netFailReq, {}));
+      expect(missingEnvRes.status).toBe(502);
+      expect(missingEnvRes.headers.get('cache-control')).toBe('no-store, private');
+      expect(missingEnvRes.headers.get('pragma')).toBe('no-cache');
+
+      // 3. Non-API path -> 404
+      const nonApiReq = new Request('https://my-saas.pages.dev/static/bundle.js', { method: 'GET' });
+      const nonApiRes = await onRequest(createMockContext(nonApiReq));
+      expect(nonApiRes.status).toBe(404);
+      expect(nonApiRes.headers.get('cache-control')).toBe('no-store, private');
+      expect(nonApiRes.headers.get('pragma')).toBe('no-cache');
+
+      // 4. Path traversal escaping /api/ -> 404
+      const traversalReq = new Request('https://my-saas.pages.dev/api/../admin', { method: 'GET' });
+      const traversalRes = await onRequest(createMockContext(traversalReq));
+      expect(traversalRes.status).toBe(404);
+      expect(traversalRes.headers.get('cache-control')).toBe('no-store, private');
+      expect(traversalRes.headers.get('pragma')).toBe('no-cache');
+    });
+
+    it('sets cache: no-store on upstream fetch subrequests', async () => {
+      let capturedInit: RequestInit | undefined;
+      globalThis.fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+        capturedInit = init;
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+
+      const clientReq = new Request('https://my-saas.pages.dev/api/v1/locations', {
+        method: 'GET',
+      });
+
+      const context = createMockContext(clientReq);
+      await onRequest(context);
+
+      expect(capturedInit?.cache).toBe('no-store');
+    });
   });
 
   describe('5. Error Response Envelope (createErrorResponse)', () => {
@@ -581,7 +787,8 @@ describe('Cloudflare Pages API Proxy Implementation (Phase 8.4.3)', () => {
       const res = createErrorResponse(502, 'SERVICE_UNAVAILABLE', 'Service is currently unavailable.');
       expect(res.status).toBe(502);
       expect(res.headers.get('content-type')).toContain('application/json');
-      expect(res.headers.get('cache-control')).toContain('no-store');
+      expect(res.headers.get('cache-control')).toBe('no-store, private');
+      expect(res.headers.get('pragma')).toBe('no-cache');
 
       const data = await res.json();
       expect(data).toEqual({
