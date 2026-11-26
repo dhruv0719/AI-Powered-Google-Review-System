@@ -9,6 +9,7 @@ const EnvSchema = z
     PORT: z.coerce.number().default(3000),
     HOST: z.string().default('0.0.0.0'),
     DATABASE_URL: z.string().optional(),
+    MIGRATION_DATABASE_URL: z.string().optional(),
     SESSION_SECRET: z
       .string()
       .min(32, { message: 'SESSION_SECRET must be at least 32 characters long' })
@@ -84,6 +85,38 @@ const EnvSchema = z
     {
       message: 'INTERNAL_PROXY_SECRET must be explicitly set to a secret of at least 32 characters in production',
       path: ['INTERNAL_PROXY_SECRET'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.NODE_ENV === 'production') {
+        const rawDbUrl = process.env.DATABASE_URL;
+        return typeof rawDbUrl === 'string' && rawDbUrl.trim().length > 0;
+      }
+      return true;
+    },
+    {
+      message: 'DATABASE_URL must be explicitly set to a pooled PostgreSQL connection URI in production',
+      path: ['DATABASE_URL'],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.NODE_ENV === 'production') {
+        const rawMigrationUrl = process.env.MIGRATION_DATABASE_URL;
+        if (!rawMigrationUrl || rawMigrationUrl.trim().length === 0) {
+          return false;
+        }
+        if (rawMigrationUrl.includes('-pooler')) {
+          return false;
+        }
+        return true;
+      }
+      return true;
+    },
+    {
+      message: 'MIGRATION_DATABASE_URL must be explicitly set to a direct (non-pooled) PostgreSQL connection URI in production and must not use a pooler endpoint (-pooler)',
+      path: ['MIGRATION_DATABASE_URL'],
     }
   );
 

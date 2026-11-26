@@ -17,11 +17,20 @@ const MIGRATION_ADVISORY_LOCK_ID = '847291048201948';
 export async function runMigrations(customDb?: any) {
   const env = getEnv();
 
-  if (env.DATABASE_URL && !customDb) {
+  // Explicitly prioritize direct MIGRATION_DATABASE_URL over DATABASE_URL for migrations.
+  // Neon's pooled endpoint (PgBouncer in transaction mode) does not support session-level advisory locks.
+  // Direct connections to Neon support full session-level advisory lock semantics.
+  const migrationUrl = env.MIGRATION_DATABASE_URL || env.DATABASE_URL;
+
+  if (env.NODE_ENV === 'production' && !env.MIGRATION_DATABASE_URL) {
+    throw new Error('MIGRATION_DATABASE_URL must be explicitly set in production for migration execution.');
+  }
+
+  if (migrationUrl && !customDb) {
     // Dedicated single connection for PostgreSQL migration serialization.
     // Acquiring and releasing pg_advisory_lock on the exact same dedicated connection (max: 1)
     // guarantees that connection pooling cannot release or orphan the lock on another connection.
-    const migrationClient = postgres(env.DATABASE_URL, { max: 1 });
+    const migrationClient = postgres(migrationUrl, { max: 1 });
     try {
       // 1. Acquire session-level advisory lock on dedicated connection
       await migrationClient`SELECT pg_advisory_lock(${MIGRATION_ADVISORY_LOCK_ID}::bigint)`;
@@ -39,7 +48,7 @@ export async function runMigrations(customDb?: any) {
   } else {
     // Custom DB or in-memory PGlite path
     const db = customDb || createDatabase();
-    if (env.DATABASE_URL) {
+    if (migrationUrl) {
       await migratePg(db, { migrationsFolder });
     } else {
       await migratePglite(db, { migrationsFolder });
