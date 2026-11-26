@@ -2,11 +2,13 @@ import {
   LocationDTO,
   ServiceDTO,
   TenantDTO,
-  UserDTO,
   CampaignDTO,
   PrivateFeedbackDTO,
   FeedbackListResponseDTO,
   CreatePrivateFeedbackInput,
+  AuthResponseDTO,
+  LoginInput,
+  RegisterInput,
 } from '@review-system/shared';
 import { publicApi } from './services/publicApi.js';
 
@@ -37,7 +39,21 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
 
 export const api = {
   // Auth & Tenant Context
-  getMe: () => request<{ user: UserDTO; activeTenant: TenantDTO; availableTenants: TenantDTO[] }>('/auth/me'),
+  getMe: () => request<AuthResponseDTO>('/auth/me'),
+  login: (data: LoginInput) =>
+    request<AuthResponseDTO>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  register: (data: RegisterInput) =>
+    request<AuthResponseDTO>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  logout: () =>
+    request<{ status: string }>('/auth/logout', {
+      method: 'POST',
+    }),
   switchTenant: (tenantId: string) =>
     request<{ activeTenant: TenantDTO }>(`/owner/tenants/${tenantId}/switch`, { method: 'POST' }),
   updateTenant: (tenantId: string, displayName: string) =>

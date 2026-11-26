@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { TenantDTO, UserDTO, LocationDTO } from '@review-system/shared';
+import { TenantDTO, UserDTO, LocationDTO, AuthResponseDTO } from '@review-system/shared';
 import { api } from '../api.js';
+import { OwnerAuth } from './OwnerAuth.js';
 import { LocationsView } from './LocationsView.js';
 import { ServicesView } from './ServicesView.js';
 import { CampaignsView } from './CampaignsView.js';
@@ -17,6 +18,8 @@ export function OwnerPortal() {
   const [locations, setLocations] = useState<LocationDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const fetchSession = async () => {
     try {
@@ -28,10 +31,17 @@ export function OwnerPortal() {
       setAvailableTenants(res.availableTenants);
 
       if (res.activeTenant) {
-        const locRes = await api.getLocations(res.activeTenant.id);
-        setLocations(locRes.locations);
+        try {
+          const locRes = await api.getLocations(res.activeTenant.id);
+          setLocations(locRes.locations);
+        } catch (locErr: any) {
+          // Handled separately from authentication failure
+          console.warn('[OwnerPortal] Location loading failure:', locErr);
+        }
       }
     } catch (err: any) {
+      setUser(null);
+      setActiveTenant(null);
       setError(err.message || 'Not authenticated. Please log in.');
     } finally {
       setLoading(false);
@@ -41,6 +51,45 @@ export function OwnerPortal() {
   useEffect(() => {
     fetchSession();
   }, []);
+
+  const handleAuthSuccess = async (authData: AuthResponseDTO) => {
+    setUser(authData.user);
+    setActiveTenant(authData.activeTenant);
+    setAvailableTenants(authData.availableTenants);
+    setError(null);
+    setLogoutError(null);
+
+    if (authData.activeTenant) {
+      try {
+        const locRes = await api.getLocations(authData.activeTenant.id);
+        setLocations(locRes.locations);
+      } catch (locErr: any) {
+        console.warn('[OwnerPortal] Initial location loading failure:', locErr);
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      setIsLoggingOut(true);
+      setLogoutError(null);
+      await api.logout();
+      // Server-side logout succeeded, session cookie cleared on server
+      setUser(null);
+      setActiveTenant(null);
+      setAvailableTenants([]);
+      setLocations([]);
+      setSelectedLocationForServices(null);
+      setSelectedLocationForCampaigns(null);
+      setError(null);
+    } catch (err: any) {
+      // Mandatory requirement 5: Handle logout failures explicitly.
+      // Do not claim the session is cleared if the server-side logout request fails.
+      setLogoutError(err?.message || 'Failed to log out. Please try again.');
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   const handleSwitchTenant = async (tenantId: string) => {
     try {
@@ -75,25 +124,7 @@ export function OwnerPortal() {
   }
 
   if (!user || !activeTenant) {
-    return (
-      <div
-        data-testid="owner-login-prompt"
-        style={{
-          maxWidth: '400px',
-          margin: '100px auto',
-          fontFamily: 'sans-serif',
-          textAlign: 'center',
-          padding: '24px',
-          border: '1px solid #e5e7eb',
-          borderRadius: '8px',
-        }}
-      >
-        <h2 style={{ margin: '0 0 12px 0' }}>Review SaaS Portal</h2>
-        <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '20px' }}>
-          {error || 'Please authenticate via session cookie.'}
-        </p>
-      </div>
-    );
+    return <OwnerAuth onAuthSuccess={handleAuthSuccess} />;
   }
 
   return (
@@ -144,9 +175,71 @@ export function OwnerPortal() {
             <span style={{ color: '#4b5563' }}>
               Logged in as: <strong>{user.fullName}</strong>
             </span>
+            <button
+              type="button"
+              data-testid="owner-logout-button"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              className="touch-press"
+              style={{
+                padding: '6px 14px',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#dc2626',
+                backgroundColor: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '6px',
+                cursor: isLoggingOut ? 'not-allowed' : 'pointer',
+                minHeight: '36px',
+              }}
+            >
+              {isLoggingOut ? 'Logging out...' : 'Log Out'}
+            </button>
           </div>
         </div>
       </header>
+
+      {/* Dashboard general error banner */}
+      {error && (
+        <div
+          role="alert"
+          aria-live="polite"
+          data-testid="owner-dashboard-error"
+          style={{
+            maxWidth: '1000px',
+            margin: '16px auto 0',
+            padding: '12px 16px',
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fecaca',
+            color: '#991b1b',
+            borderRadius: '6px',
+            fontSize: '14px',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* Logout error banner */}
+      {logoutError && (
+        <div
+          role="alert"
+          aria-live="polite"
+          data-testid="owner-logout-error"
+          style={{
+            maxWidth: '1000px',
+            margin: '16px auto 0',
+            padding: '12px 16px',
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fecaca',
+            color: '#991b1b',
+            borderRadius: '6px',
+            fontSize: '14px',
+          }}
+        >
+          {logoutError}
+        </div>
+      )}
 
       {/* Main Tab Navigation */}
       <div style={{ backgroundColor: '#fff', borderBottom: '1px solid #e5e7eb' }}>

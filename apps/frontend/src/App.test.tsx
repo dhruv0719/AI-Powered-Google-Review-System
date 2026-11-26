@@ -45,7 +45,7 @@ describe('App Routing', () => {
     );
   });
 
-  it('2. should route / (or owner path) to OwnerPortal without regression', async () => {
+  it('2. should route / (or owner path) to OwnerPortal rendering authentication form when unauthenticated', async () => {
     vi.spyOn(api, 'getMe').mockRejectedValue(new Error('Unauthorized'));
 
     render(
@@ -55,10 +55,14 @@ describe('App Routing', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('owner-login-prompt')).toBeInTheDocument();
+      expect(screen.getByTestId('owner-auth-form')).toBeInTheDocument();
     });
 
     expect(screen.getByText('Review SaaS Portal')).toBeInTheDocument();
+    expect(screen.getByTestId('auth-mode-login-tab')).toBeInTheDocument();
+    expect(screen.getByTestId('login-email-input')).toBeInTheDocument();
+    expect(screen.getByTestId('login-password-input')).toBeInTheDocument();
+    expect(screen.getByTestId('auth-submit-button')).toHaveTextContent(/Log In/i);
     expect(screen.queryByTestId('customer-layout-footer')).not.toBeInTheDocument();
   });
 });

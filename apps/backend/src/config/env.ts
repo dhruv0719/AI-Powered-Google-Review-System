@@ -3,13 +3,31 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+export function cleanDatabaseUrl(val?: string): string | undefined {
+  if (!val) return undefined;
+  let cleaned = val.trim();
+  // Strip leading psql and surrounding quotes if copied from Neon CLI snippet
+  if (cleaned.startsWith("psql '") && cleaned.endsWith("'")) {
+    cleaned = cleaned.slice(6, -1).trim();
+  } else if (cleaned.startsWith('psql "') && cleaned.endsWith('"')) {
+    cleaned = cleaned.slice(6, -1).trim();
+  } else if (cleaned.startsWith('psql ')) {
+    cleaned = cleaned.slice(5).trim();
+  }
+  // Strip surrounding quotes if present
+  if ((cleaned.startsWith("'") && cleaned.endsWith("'")) || (cleaned.startsWith('"') && cleaned.endsWith('"'))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().default(3000),
     HOST: z.string().default('0.0.0.0'),
-    DATABASE_URL: z.string().optional(),
-    MIGRATION_DATABASE_URL: z.string().optional(),
+    DATABASE_URL: z.string().optional().transform(cleanDatabaseUrl),
+    MIGRATION_DATABASE_URL: z.string().optional().transform(cleanDatabaseUrl),
     SESSION_SECRET: z
       .string()
       .min(32, { message: 'SESSION_SECRET must be at least 32 characters long' })
