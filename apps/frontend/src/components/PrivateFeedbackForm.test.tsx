@@ -1098,6 +1098,12 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
   // M6.5 AI Draft Assistant Integration Tests
   // =========================================================================
   describe('M6.5 AI Draft Assistant Integration', () => {
+    beforeEach(() => {
+      vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+        expiresAt: new Date().toISOString(),
+      });
+    });
+
     it('31. should render AI assistant in the private-feedback section below textarea and counter', () => {
       render(<PrivateFeedbackForm {...defaultProps} />);
 
@@ -1464,9 +1470,9 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
     });
 
     it('43. should preserve form data and display helpful error if session renewal fails', async () => {
-      vi.spyOn(publicApi, 'createPublicSession').mockRejectedValue(
-        new Error('Network offline during session renewal')
-      );
+      vi.spyOn(publicApi, 'createPublicSession')
+        .mockResolvedValueOnce({ expiresAt: new Date().toISOString() })
+        .mockRejectedValueOnce(new Error('Network offline during session renewal'));
       vi.spyOn(publicApi, 'generateAiDraft').mockRejectedValue(
         new PublicApiError('Session expired', 401, ErrorCodes.INVALID_SESSION)
       );
@@ -1530,6 +1536,177 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
       );
       // Polish button is ready for explicit user action
       expect(screen.getByTestId('polish-draft-button')).not.toBeDisabled();
+    });
+
+    it('45. should await pending session creation when customer pastes >=10 chars and immediately clicks Polish', async () => {
+      let resolveSession: (value: any) => void;
+      const slowSessionPromise = new Promise((resolve) => {
+        resolveSession = resolve;
+      });
+      const sessionSpy = vi.spyOn(publicApi, 'createPublicSession').mockReturnValue(slowSessionPromise as any);
+      const aiSpy = vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+        draft: 'Polished review from AI assistant.',
+        generationsRemaining: 2,
+        status: 'generated',
+        isReplay: false,
+      });
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      // 1. Customer pastes >= 10 characters
+      fireEvent.change(textarea, { target: { value: 'Great food and wonderful service today!' } });
+
+      // Session creation is in-flight
+      expect(sessionSpy).toHaveBeenCalledTimes(1);
+      expect(aiSpy).not.toHaveBeenCalled();
+
+      // 2. Customer immediately clicks Polish with AI before session resolves
+      const polishBtn = screen.getByTestId('polish-draft-button');
+      fireEvent.click(polishBtn);
+
+      // AI endpoint has NOT been called yet because session is still pending!
+      expect(aiSpy).not.toHaveBeenCalled();
+      // Polish button is locked in generating state
+      expect(screen.getByText('Polishing Draft...')).toBeInTheDocument();
+
+      // 3. Resolve the in-flight session promise
+      resolveSession!({ expiresAt: new Date().toISOString() });
+
+      // 4. Once session resolves, AI request executes cleanly
+      await waitFor(() => {
+        expect(aiSpy).toHaveBeenCalledTimes(1);
+      });
+
+      // Exactly ONE session request and ONE AI request were issued
+      expect(sessionSpy).toHaveBeenCalledTimes(1);
+      expect(aiSpy).toHaveBeenCalledWith(
+        defaultProps.code,
+        expect.objectContaining({
+          feedback: 'Great food and wonderful service today!',
+        })
+      );
+    });
+
+    it('46. should not call AI endpoint when session creation fails, and show actionable error', async () => {
+      let rejectSession: (reason: any) => void;
+      const slowSessionPromise = new Promise((_, reject) => {
+        rejectSession = reject;
+      });
+      const sessionSpy = vi.spyOn(publicApi, 'createPublicSession').mockReturnValue(slowSessionPromise as any);
+      const aiSpy = vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+        draft: 'Should never be called',
+        generationsRemaining: 2,
+        status: 'generated',
+        isReplay: false,
+      });
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Pasting long enough text to enable AI' } });
+
+      // Immediately click Polish while session is pending
+      const polishBtn = screen.getByTestId('polish-draft-button');
+      fireEvent.click(polishBtn);
+
+      // Reject the pending session creation
+      rejectSession!(new PublicApiError('Connection dropped', 500));
+
+      // Wait for error notice to appear
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-error-notice')).toHaveTextContent(
+          'Unable to start a review session. Please check your connection and try again.'
+        );
+      });
+
+      // AI endpoint was NEVER called!
+      expect(aiSpy).not.toHaveBeenCalled();
+      // Exactly ONE session call was attempted
+      expect(sessionSpy).toHaveBeenCalledTimes(1);
+      // Form controls remain unlocked and accessible
+      expect(textarea).not.toBeDisabled();
+      expect(polishBtn).not.toBeDisabled();
+    });
+
+    it('47. should allow intentional recovery when session creation fails once, then customer retries AI Polish', async () => {
+      const sessionSpy = vi
+        .spyOn(publicApi, 'createPublicSession')
+        .mockRejectedValueOnce(new PublicApiError('Transient network failure', 503))
+        .mockResolvedValueOnce({ expiresAt: new Date().toISOString() });
+
+      const aiSpy = vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+        draft: 'Polished draft after recovered session.',
+        generationsRemaining: 2,
+        status: 'generated',
+        isReplay: false,
+      });
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      fireEvent.change(textarea, { target: { value: 'Excellent attention to detail by the technician.' } });
+
+      // Attempt 1 fails at session creation
+      const polishBtn = screen.getByTestId('polish-draft-button');
+      fireEvent.click(polishBtn);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('ai-error-notice')).toHaveTextContent(
+          'Unable to start a review session. Please check your connection and try again.'
+        );
+      });
+      expect(aiSpy).not.toHaveBeenCalled();
+      expect(sessionSpy).toHaveBeenCalledTimes(1);
+
+      // Customer clicks retry on the AI assistant
+      const retryBtn = screen.getByTestId('ai-retry-button');
+      fireEvent.click(retryBtn);
+
+      // Session recovery succeeds, then AI draft is generated!
+      await waitFor(() => {
+        expect(screen.getByText('Polished draft after recovered session.')).toBeInTheDocument();
+      });
+
+      expect(sessionSpy).toHaveBeenCalledTimes(2);
+      expect(aiSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('48. should reuse the same in-flight session promise during concurrent typing and AI Polish clicks', async () => {
+      let resolveSession: (value: any) => void;
+      const sessionPromise = new Promise((resolve) => {
+        resolveSession = resolve;
+      });
+      const sessionSpy = vi.spyOn(publicApi, 'createPublicSession').mockReturnValue(sessionPromise as any);
+      const aiSpy = vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+        draft: 'Concurrent test polished draft.',
+        generationsRemaining: 2,
+        status: 'generated',
+        isReplay: false,
+      });
+
+      render(<PrivateFeedbackForm {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText(/share details/i);
+      // Keystroke 1 triggers ensureSession
+      fireEvent.change(textarea, { target: { value: 'First few words' } });
+      // Keystroke 2 occurs while session is still in flight
+      fireEvent.change(textarea, { target: { value: 'First few words and more details here!' } });
+
+      // Click Polish while session is still in flight
+      fireEvent.click(screen.getByTestId('polish-draft-button'));
+
+      // Still only 1 session request was dispatched!
+      expect(sessionSpy).toHaveBeenCalledTimes(1);
+      expect(aiSpy).not.toHaveBeenCalled();
+
+      // Resolve the single session promise
+      resolveSession!({ expiresAt: new Date().toISOString() });
+
+      await waitFor(() => {
+        expect(aiSpy).toHaveBeenCalledTimes(1);
+      });
+      expect(sessionSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

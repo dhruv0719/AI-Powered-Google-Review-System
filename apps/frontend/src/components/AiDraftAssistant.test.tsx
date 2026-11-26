@@ -19,6 +19,7 @@ describe('AiDraftAssistant Component', () => {
     onRevertDraft: vi.fn(),
     hasAppliedDraft: false,
     onGeneratingChange: vi.fn(),
+    onEnsureSession: vi.fn().mockResolvedValue(true),
   };
 
   beforeEach(() => {
@@ -879,6 +880,7 @@ describe('AiDraftAssistant Component', () => {
     const pendingPromise = new Promise((_, reject) => {
       rejectAi = reject;
     });
+    pendingPromise.catch(() => {});
     vi.spyOn(publicApi, 'generateAiDraft').mockReturnValue(pendingPromise as any);
 
     const onGeneratingChange = vi.fn();
@@ -933,5 +935,62 @@ describe('AiDraftAssistant Component', () => {
     // Unmounting afterward must NOT emit any extra notifications
     unmount();
     expect(onGeneratingChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('23. should await onEnsureSession before calling generateAiDraft and block duplicate clicks while pending', async () => {
+    let resolveSession!: (value: boolean) => void;
+    const sessionPromise = new Promise<boolean>((resolve) => {
+      resolveSession = resolve;
+    });
+    const onEnsureSession = vi.fn().mockReturnValue(sessionPromise);
+    const aiSpy = vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+      status: 'generated',
+      draft: 'Completed draft after session wait.',
+      generationsRemaining: 2,
+      isReplay: false,
+    });
+
+    render(<AiDraftAssistant {...defaultProps} onEnsureSession={onEnsureSession} />);
+
+    const polishBtn = screen.getByRole('button', { name: /polish with ai/i });
+    // First click starts process
+    fireEvent.click(polishBtn);
+
+    expect(onEnsureSession).toHaveBeenCalledTimes(1);
+    // AI generation has NOT started yet
+    expect(aiSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Polishing Draft...')).toBeInTheDocument();
+
+    // Rapid second click while session is pending must be rejected by isGenerating lock
+    fireEvent.click(polishBtn);
+    expect(onEnsureSession).toHaveBeenCalledTimes(1);
+    expect(aiSpy).not.toHaveBeenCalled();
+
+    // Now resolve the session promise
+    await act(async () => {
+      resolveSession(true);
+    });
+
+    await waitFor(() => {
+      expect(aiSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('24. should not call generateAiDraft if onEnsureSession returns false and display actionable error', async () => {
+    const onEnsureSession = vi.fn().mockResolvedValue(false);
+    const aiSpy = vi.spyOn(publicApi, 'generateAiDraft');
+
+    render(<AiDraftAssistant {...defaultProps} onEnsureSession={onEnsureSession} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-error-notice')).toHaveTextContent(
+        'Unable to start a review session. Please check your connection and try again.'
+      );
+    });
+
+    expect(aiSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('ai-retry-button')).toBeInTheDocument();
   });
 });

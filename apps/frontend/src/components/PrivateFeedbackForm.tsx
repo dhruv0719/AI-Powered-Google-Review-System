@@ -136,6 +136,23 @@ export function PrivateFeedbackForm({
     return false;
   };
 
+  const handleEnsureSessionForAi = async (): Promise<boolean> => {
+    if (sessionInitiated) {
+      return true;
+    }
+    if (sessionPromiseRef.current) {
+      try {
+        await sessionPromiseRef.current;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    // An intentional AI polish action resets the failure circuit breaker and attempts a controlled recovery
+    sessionFailedRef.current = false;
+    return ensureSession();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -528,6 +545,7 @@ export function PrivateFeedbackForm({
           hasAppliedDraft={hasAppliedAiDraft}
           onGeneratingChange={setIsAiGenerating}
           onRequestSessionRenew={handleRequestSessionRenew}
+          onEnsureSession={handleEnsureSessionForAi}
         />
       </div>
 

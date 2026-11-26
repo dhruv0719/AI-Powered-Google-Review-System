@@ -19,6 +19,7 @@ export interface AiDraftAssistantProps {
   hasAppliedDraft: boolean;
   onGeneratingChange?: (isGenerating: boolean) => void;
   onRequestSessionRenew?: () => Promise<boolean>;
+  onEnsureSession: () => Promise<boolean>;
 }
 
 interface ActiveDraftState {
@@ -73,6 +74,7 @@ export function AiDraftAssistant({
   hasAppliedDraft,
   onGeneratingChange,
   onRequestSessionRenew,
+  onEnsureSession,
 }: AiDraftAssistantProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [authoritativeQuota, setAuthoritativeQuota] = useState<number | null>(null);
@@ -189,6 +191,18 @@ export function AiDraftAssistant({
     setIsSessionExpired(false);
 
     try {
+      const sessionReady = await onEnsureSession();
+      if (!isMountedRef.current) {
+        return;
+      }
+      if (!sessionReady) {
+        setErrorMessage(
+          'Unable to start a review session. Please check your connection and try again.'
+        );
+        setIsRetryable(true);
+        return;
+      }
+
       const res = await publicApi.generateAiDraft(code, payloadToSend);
 
       if (!isMountedRef.current) {
