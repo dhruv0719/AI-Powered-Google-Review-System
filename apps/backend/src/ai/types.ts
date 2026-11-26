@@ -85,7 +85,10 @@ export class AiProviderTimeoutError extends Error {
 
 export class AiProviderUnavailableError extends Error {
   public readonly code = 'AI_PROVIDER_UNAVAILABLE';
-  constructor(message = 'AI provider is unavailable or rate limited') {
+  constructor(
+    message = 'AI provider is unavailable or rate limited',
+    public readonly retryAfterSeconds?: number
+  ) {
     super(message);
     this.name = 'AiProviderUnavailableError';
   }

@@ -141,6 +141,7 @@ describe('GroqAiProvider Unit & Integration Tests', () => {
 
     expect(capturedBody).toBeDefined();
     expect(capturedBody.model).toBe('openai/gpt-oss-20b');
+    expect(capturedBody.max_completion_tokens).toBe(500);
     expect(capturedBody.temperature).toBe(0.2);
     expect(capturedBody.reasoning_effort).toBe('low');
     expect(capturedBody.include_reasoning).toBe(false);
@@ -343,15 +344,32 @@ describe('GroqAiProvider Unit & Integration Tests', () => {
   });
 
   // 13. HTTP 429 Rate Limit
-  it('throws AiProviderUnavailableError on HTTP 429 rate limit', async () => {
+  it('throws AiProviderUnavailableError on HTTP 429 rate limit with Retry-After guidance', async () => {
     const provider = new GroqAiProvider({ apiKey: TEST_API_KEY });
 
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      createMockResponse({ error: 'Rate limit reached' }, 429, false)
-    );
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 429,
+      ok: false,
+      headers: new Headers({ 'retry-after': '45' }),
+      json: async () => ({ error: 'Rate limit reached' }),
+    } as unknown as Response);
 
-    await expect(provider.generateDraft({ promptMessages: [] })).rejects.toThrow(
-      AiProviderUnavailableError
+    try {
+      await provider.generateDraft({ promptMessages: [] });
+      expect.fail('Should have thrown');
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(AiProviderUnavailableError);
+      expect(err.retryAfterSeconds).toBe(45);
+    }
+  });
+
+  // 13.5. Bound Prompt Length
+  it('throws AiMalformedResponseError when prompt input character length exceeds 4000', async () => {
+    const provider = new GroqAiProvider({ apiKey: TEST_API_KEY });
+    const hugeMessage = { role: 'user' as const, content: 'x'.repeat(4001) };
+
+    await expect(provider.generateDraft({ promptMessages: [hugeMessage] })).rejects.toThrow(
+      AiMalformedResponseError
     );
   });
 

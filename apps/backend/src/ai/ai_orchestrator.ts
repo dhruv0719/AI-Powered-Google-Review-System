@@ -15,6 +15,7 @@ import { AiProvider } from './adapters/ai_provider.interface.js';
 import { MockAiProvider } from './adapters/mock_provider.js';
 import { GroqAiProvider } from './adapters/groq_provider.js';
 import { computePayloadFingerprint } from './fingerprint.js';
+import { AiBudgetGuard } from './budget_guard.js';
 import {
   canonicalizeLanguage,
   checkSessionAndReplay,
@@ -25,16 +26,20 @@ import {
   AiValidationError,
   OutputGuardrailError,
 } from './session_guard.js';
+import { AiProviderUnavailableError } from './types.js';
 
 export interface AiOrchestratorOptions {
   provider?: AiProvider;
   timeoutMs?: number;
+  budgetGuard?: AiBudgetGuard;
 }
 
 export class AiOrchestrator {
   private readonly defaultProvider: AiProvider;
+  private readonly budgetGuard: AiBudgetGuard;
 
-  constructor(defaultProvider?: AiProvider) {
+  constructor(defaultProvider?: AiProvider, budgetGuard?: AiBudgetGuard) {
+    this.budgetGuard = budgetGuard ?? new AiBudgetGuard();
     if (defaultProvider) {
       this.defaultProvider = defaultProvider;
     } else {
@@ -176,16 +181,32 @@ export class AiOrchestrator {
     // 9. Provider Execution & Output Guardrails (Protected by lease)
     let draftText: string;
     const provider = options?.provider ?? this.defaultProvider;
+    const budgetGuard = options?.budgetGuard ?? this.budgetGuard;
     const timeoutMs =
       options?.timeoutMs ??
       (AiAssistantConstants.LOCK_LEASE_DURATION_SECONDS / 2) * 1000; // 15_000 ms
 
-    try {
-      const promptMessages = PromptEngine.buildPromptMessages(
-        sanitizedExperience,
-        canonicalLanguage
-      );
+    const promptMessages = PromptEngine.buildPromptMessages(
+      sanitizedExperience,
+      canonicalLanguage
+    );
 
+    // Dynamic token estimation based on input size + 500 completion token ceiling
+    const estimatedTokens = budgetGuard.estimateTokens(promptMessages, 500);
+    const budgetCheck = budgetGuard.acquireBudget(estimatedTokens);
+
+    if (!budgetCheck.allowed) {
+      // Free lease immediately so customer session quota is NOT consumed
+      await releaseSessionLease(db, sessionId, lockToken).catch(() => {});
+      throw new AiProviderUnavailableError(
+        budgetCheck.reason || 'AI capacity temporarily exceeded. Please try again shortly.',
+        budgetCheck.retryAfterSeconds
+      );
+    }
+
+    let actualTokens: number | undefined;
+
+    try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -198,6 +219,10 @@ export class AiOrchestrator {
         });
       } finally {
         clearTimeout(timer);
+      }
+
+      if (aiResult.tokenUsage) {
+        actualTokens = aiResult.tokenUsage.totalTokens;
       }
 
       if (aiResult.status === 'insufficient_context' || !aiResult.draft) {
@@ -229,6 +254,9 @@ export class AiOrchestrator {
       // Release lease with dual-predicate fencing upon failure, timeout, or guardrail rejection
       await releaseSessionLease(db, sessionId, lockToken).catch(() => {});
       throw err;
+    } finally {
+      // Safely release concurrency slot and reconcile actual token usage
+      budgetGuard.releaseBudget(estimatedTokens, actualTokens);
     }
 
     // 10. Phase 2: Atomic Settlement Transaction (Hierarchy T -> L -> C -> S)
