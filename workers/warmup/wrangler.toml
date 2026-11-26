@@ -1,0 +1,12 @@
+name = "review-system-warmup"
+main = "src/index.ts"
+compatibility_date = "2024-11-11"
+
+# Cron trigger: Fires every 6 minutes between 04:00 and 15:59 UTC
+# Covers India Standard Time (UTC+5:30) operating window
+[triggers]
+crons = ["*/6 4-15 * * *"]
+
+[vars]
+# Configurable Render backend health URL. NEVER point this to /ready.
+BACKEND_HEALTH_URL = "https://ai-powered-google-review-backend.onrender.com/health"
