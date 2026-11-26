@@ -884,7 +884,10 @@ export const publicRoutes: FastifyPluginAsync<PublicRoutesOptions> = async (
     }
 
     if (err instanceof AiProviderUnavailableError) {
-      request.log.warn({ err }, 'AI provider unavailable');
+      request.log.warn({ err, retryAfter: err.retryAfterSeconds }, 'AI provider unavailable');
+      if (err.retryAfterSeconds) {
+        reply.header('Retry-After', String(err.retryAfterSeconds));
+      }
       return reply.status(502).send({
         error: {
           code: ErrorCodes.AI_PROVIDER_UNAVAILABLE,

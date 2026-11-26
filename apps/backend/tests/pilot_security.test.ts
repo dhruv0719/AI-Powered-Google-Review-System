@@ -66,6 +66,8 @@ describe('Phase 7.0.3 Pilot Security Remediation Tests', () => {
       process.env.NODE_ENV = 'production';
       process.env.SESSION_SECRET = 'a'.repeat(32);
       process.env.INTERNAL_PROXY_SECRET = 'b'.repeat(32);
+      process.env.DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456-pooler.us-east-2.aws.neon.tech/neondb';
+      process.env.MIGRATION_DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb';
       delete process.env.COOKIE_SECURE;
 
       const env = getEnv();
@@ -176,9 +178,12 @@ describe('Phase 7.0.3 Pilot Security Remediation Tests', () => {
       process.env.NODE_ENV = 'production';
       process.env.SESSION_SECRET = 'custom-production-session-secret-key-32chars!';
       process.env.INTERNAL_PROXY_SECRET = 'custom-production-proxy-secret-key-32chars!';
+      process.env.DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456-pooler.us-east-2.aws.neon.tech/neondb';
+      process.env.MIGRATION_DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb';
 
       const env = getEnv();
       expect(env.SESSION_SECRET).toBe('custom-production-session-secret-key-32chars!');
+      expect(env.MIGRATION_DATABASE_URL).toBe('postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb');
     });
 
     it('permits default fallback string in development and test environments', () => {

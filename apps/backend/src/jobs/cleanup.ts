@@ -1,7 +1,8 @@
 import { sql, inArray } from 'drizzle-orm';
 import { ephemeralSessions, privateFeedback, privateFeedbackServices } from '../drizzle/schema.js';
 
-let cleanupTimer: NodeJS.Timeout | null = null;
+let startupTimer: NodeJS.Timeout | null = null;
+let cleanupIntervalTimer: NodeJS.Timeout | null = null;
 let isRunning = false;
 
 /**
@@ -119,34 +120,64 @@ export async function runCleanupNow(db: any): Promise<{
   }
 }
 
+export interface CleanupJobOptions {
+  initialDelayMs?: number;
+  intervalMs?: number;
+}
+
+const DEFAULT_INITIAL_DELAY_MS = 30 * 60 * 1000; // 30 minutes deferred startup
+const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours recurring interval
+
 /**
  * Starts the background in-process cleanup runner:
- * - Executes immediately once on startup.
- * - Schedules recurring execution every 24 hours.
+ * - Defers the initial table scan by 30 minutes after startup to relieve cold boot DB contention.
+ * - Schedules recurring execution every 24 hours thereafter.
+ * - Unrefs timers so tests and process shutdowns are never blocked.
+ * - Idempotent: avoids duplicate scheduling if already running.
  */
-export function startCleanupJob(db: any): void {
-  // Initial run on startup
-  runCleanupNow(db).catch((err) => {
-    console.error('[CleanupJob] Startup run failed:', err);
-  });
+export function startCleanupJob(db: any, options?: CleanupJobOptions): void {
+  // If already active, don't duplicate timers
+  if (startupTimer !== null || cleanupIntervalTimer !== null) {
+    return;
+  }
 
-  // 24-hour interval
-  const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-  cleanupTimer = setInterval(() => {
-    runCleanupNow(db).catch((err) => {
-      console.error('[CleanupJob] Recurring run failed:', err);
-    });
-  }, TWENTY_FOUR_HOURS_MS);
+  const initialDelay = options?.initialDelayMs ?? DEFAULT_INITIAL_DELAY_MS;
+  const interval = options?.intervalMs ?? DEFAULT_INTERVAL_MS;
 
-  // Unref timer so it does not keep test runners or process alive unintentionally
-  if (cleanupTimer.unref) {
-    cleanupTimer.unref();
+  startupTimer = setTimeout(async () => {
+    startupTimer = null;
+    try {
+      await runCleanupNow(db);
+    } catch (err) {
+      console.error('[CleanupJob] Deferred startup run failed:', err);
+    }
+
+    // After initial deferred run completes, start 24-hour recurring interval
+    cleanupIntervalTimer = setInterval(async () => {
+      try {
+        await runCleanupNow(db);
+      } catch (err) {
+        console.error('[CleanupJob] Recurring run failed:', err);
+      }
+    }, interval);
+
+    if (cleanupIntervalTimer.unref) {
+      cleanupIntervalTimer.unref();
+    }
+  }, initialDelay);
+
+  if (startupTimer.unref) {
+    startupTimer.unref();
   }
 }
 
 export function stopCleanupJob(): void {
-  if (cleanupTimer) {
-    clearInterval(cleanupTimer);
-    cleanupTimer = null;
+  if (startupTimer !== null) {
+    clearTimeout(startupTimer);
+    startupTimer = null;
+  }
+  if (cleanupIntervalTimer !== null) {
+    clearInterval(cleanupIntervalTimer);
+    cleanupIntervalTimer = null;
   }
 }

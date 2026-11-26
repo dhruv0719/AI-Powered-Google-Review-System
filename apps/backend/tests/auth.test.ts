@@ -314,4 +314,102 @@ describe('Authentication & Session Integration Tests', () => {
       .where(eq(users.email, 'hacker@example.com'));
     expect(dbUser).toBeUndefined();
   });
+
+  // 14. Route-level Rate Limiting on /login
+  it('14. should rate-limit repeated login attempts from the same IP with 429 RATE_LIMITED', async () => {
+    const limitedSetup = await createTestApp({
+      rateLimitOverrides: {
+        authLoginMax: 2,
+      },
+    });
+    const limitedApp = limitedSetup.app;
+
+    // First attempt -> 401 (invalid credentials)
+    const res1 = await limitedApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'wrong@example.com', password: 'Password123!' },
+    });
+    expect(res1.statusCode).toBe(401);
+
+    // Second attempt -> 401
+    const res2 = await limitedApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'wrong@example.com', password: 'Password123!' },
+    });
+    expect(res2.statusCode).toBe(401);
+
+    // Third attempt exceeds limit (max: 2) -> 429
+    const res3 = await limitedApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'wrong@example.com', password: 'Password123!' },
+    });
+    expect(res3.statusCode).toBe(429);
+    expect(res3.json().error.code).toBe(ErrorCodes.RATE_LIMITED);
+    expect(res3.headers['retry-after']).toBeDefined();
+  });
+
+  // 15. Route-level Rate Limiting on /register and Limiter Independence
+  it('15. should rate-limit /register independently from /login without account lockout', async () => {
+    const limitedSetup = await createTestApp({
+      rateLimitOverrides: {
+        authRegisterMax: 2,
+        authLoginMax: 5,
+      },
+    });
+    const limitedApp = limitedSetup.app;
+
+    // Register 1 -> 201
+    const res1 = await limitedApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'user1@example.com',
+        password: 'Password123!',
+        fullName: 'User One',
+        businessName: 'Business One',
+      },
+    });
+    expect(res1.statusCode).toBe(201);
+
+    // Register 2 -> 201
+    const res2 = await limitedApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'user2@example.com',
+        password: 'Password123!',
+        fullName: 'User Two',
+        businessName: 'Business Two',
+      },
+    });
+    expect(res2.statusCode).toBe(201);
+
+    // Register 3 exceeds limit -> 429
+    const res3 = await limitedApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: {
+        email: 'user3@example.com',
+        password: 'Password123!',
+        fullName: 'User Three',
+        businessName: 'Business Three',
+      },
+    });
+    expect(res3.statusCode).toBe(429);
+    expect(res3.json().error.code).toBe(ErrorCodes.RATE_LIMITED);
+
+    // /login is independent and must still succeed for user1!
+    const loginRes = await limitedApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: {
+        email: 'user1@example.com',
+        password: 'Password123!',
+      },
+    });
+    expect(loginRes.statusCode).toBe(200);
+  });
 });

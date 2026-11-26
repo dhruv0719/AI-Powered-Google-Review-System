@@ -124,6 +124,8 @@ export interface BuildServerOptions {
     generateDraftMax?: number;
     sessionFeedbackMax?: number;
     sessionDraftMax?: number;
+    authLoginMax?: number;
+    authRegisterMax?: number;
   };
   aiOrchestrator?: AiOrchestrator;
 }
@@ -315,7 +317,13 @@ export function buildServer(options?: BuildServerOptions): FastifyInstance {
   });
 
   // Routes
-  fastify.register(authRoutes, { prefix: '/api/v1/auth' });
+  fastify.register(authRoutes, {
+    prefix: '/api/v1/auth',
+    rateLimitOverrides: {
+      loginMax: options?.rateLimitOverrides?.authLoginMax,
+      registerMax: options?.rateLimitOverrides?.authRegisterMax,
+    },
+  });
   fastify.register(tenantRoutes, { prefix: '/api/v1/owner/tenants' });
   fastify.register(locationRoutes, { prefix: '/api/v1/owner/tenants' });
   fastify.register(serviceRoutes, { prefix: '/api/v1/owner/tenants' });

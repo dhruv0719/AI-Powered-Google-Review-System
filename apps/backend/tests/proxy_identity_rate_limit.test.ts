@@ -140,6 +140,8 @@ describe('Proxy Identity Assertion & Rate-Limit Remediation Tests (Phase 8.4.5.2
       process.env.NODE_ENV = 'production';
       process.env.INTERNAL_PROXY_SECRET = 'a'.repeat(32);
       process.env.SESSION_SECRET = 'b'.repeat(32);
+      process.env.DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456-pooler.us-east-2.aws.neon.tech/neondb';
+      process.env.MIGRATION_DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb';
       resetEnv();
 
       // Request without x-proxy-secret
@@ -241,6 +243,8 @@ describe('Proxy Identity Assertion & Rate-Limit Remediation Tests (Phase 8.4.5.2
       process.env.NODE_ENV = 'production';
       process.env.INTERNAL_PROXY_SECRET = 'a'.repeat(32);
       process.env.SESSION_SECRET = 'b'.repeat(32);
+      process.env.DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456-pooler.us-east-2.aws.neon.tech/neondb';
+      process.env.MIGRATION_DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb';
       resetEnv();
 
       const healthRes = await app.inject({
@@ -263,6 +267,8 @@ describe('Proxy Identity Assertion & Rate-Limit Remediation Tests (Phase 8.4.5.2
       process.env.NODE_ENV = 'production';
       process.env.INTERNAL_PROXY_SECRET = 'a'.repeat(32);
       process.env.SESSION_SECRET = 'b'.repeat(32);
+      process.env.DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456-pooler.us-east-2.aws.neon.tech/neondb';
+      process.env.MIGRATION_DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb';
       resetEnv();
 
       // 1. Health check succeeds
@@ -287,6 +293,8 @@ describe('Proxy Identity Assertion & Rate-Limit Remediation Tests (Phase 8.4.5.2
       process.env.NODE_ENV = 'production';
       process.env.INTERNAL_PROXY_SECRET = 'a'.repeat(32);
       process.env.SESSION_SECRET = 'b'.repeat(32);
+      process.env.DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456-pooler.us-east-2.aws.neon.tech/neondb';
+      process.env.MIGRATION_DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb';
       resetEnv();
 
       // Attacker attempts to bypass prefix check by percent-encoding '/api/' as '/%61%70%69/'
@@ -306,6 +314,8 @@ describe('Proxy Identity Assertion & Rate-Limit Remediation Tests (Phase 8.4.5.2
       process.env.NODE_ENV = 'production';
       process.env.INTERNAL_PROXY_SECRET = 'a'.repeat(32);
       process.env.SESSION_SECRET = 'b'.repeat(32);
+      process.env.DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456-pooler.us-east-2.aws.neon.tech/neondb';
+      process.env.MIGRATION_DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb';
       resetEnv();
 
       const bypassAttempts = [
@@ -333,6 +343,8 @@ describe('Proxy Identity Assertion & Rate-Limit Remediation Tests (Phase 8.4.5.2
       process.env.NODE_ENV = 'production';
       process.env.INTERNAL_PROXY_SECRET = 'a'.repeat(32);
       process.env.SESSION_SECRET = 'b'.repeat(32);
+      process.env.DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456-pooler.us-east-2.aws.neon.tech/neondb';
+      process.env.MIGRATION_DATABASE_URL = 'postgresql://user:pass@ep-cool-fog-123456.us-east-2.aws.neon.tech/neondb';
       resetEnv();
 
       const nonExemptHealthRequests = [

@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestApp } from './setup.js';
-import { runCleanupNow } from '../src/jobs/cleanup.js';
+import { runCleanupNow, startCleanupJob, stopCleanupJob } from '../src/jobs/cleanup.js';
 import {
   tenants,
   locations,
@@ -549,5 +549,47 @@ describe('Data Retention & Background Cleanup Integration Tests', () => {
 
     const [reloadedFb] = await db.select().from(privateFeedback).where(eq(privateFeedback.id, fb.id));
     expect(reloadedFb).toBeUndefined();
+  });
+
+  it('8. should defer startup cleanup execution and clean up timers on stopCleanupJob', async () => {
+    const { tenant, location, campaign } = await seedBaseData();
+
+    // Insert an expired unsubmitted session
+    const token = generateSessionToken();
+    const [sess] = await db
+      .insert(ephemeralSessions)
+      .values({
+        tenantId: tenant.id,
+        locationId: location.id,
+        campaignId: campaign.id,
+        tokenHash: hashSessionToken(token),
+        issuedCode: campaign.code,
+        expiresAt: new Date(Date.now() - 30 * 3600 * 1000), // 30h ago
+        feedbackSubmittedAt: null,
+      })
+      .returning();
+
+    // Start with 50ms initial delay (instead of production 30 minutes)
+    startCleanupJob(db, { initialDelayMs: 50, intervalMs: 200 });
+
+    // Verify session still exists immediately after start (NOT run synchronously on boot)
+    const [immediateCheck] = await db
+      .select()
+      .from(ephemeralSessions)
+      .where(eq(ephemeralSessions.id, sess.id));
+    expect(immediateCheck).toBeDefined();
+
+    // Wait 100ms for deferred startup run to execute
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Session should now be purged by the deferred run
+    const [deferredCheck] = await db
+      .select()
+      .from(ephemeralSessions)
+      .where(eq(ephemeralSessions.id, sess.id));
+    expect(deferredCheck).toBeUndefined();
+
+    // Clean up timers on shutdown
+    stopCleanupJob();
   });
 });
