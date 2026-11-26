@@ -214,6 +214,24 @@ describe('Public QR Resolution & Explicit Session Issuance Integration Tests', (
     expect(dbSessionsAfter).toHaveLength(1);
   });
 
+  it('5b. should reject session issuance with 400 when Content-Type is application/json but body is empty', async () => {
+    const { campaign } = await setupActiveCampaign();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/public/qr/${campaign.code}/sessions`,
+      headers: {
+        origin: 'http://localhost:5173',
+        'content-type': 'application/json',
+      },
+      // Fastify inject with content-type header but empty string body triggers FST_ERR_CTP_EMPTY_JSON_BODY
+      payload: '',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('FST_ERR_CTP_EMPTY_JSON_BODY');
+  });
+
   it('6. should reject request with 403 when Origin is mismatched even if Referer is canonical (Referer never overrides mismatched Origin)', async () => {
     const { campaign } = await setupActiveCampaign();
 

@@ -36,9 +36,11 @@ describe('publicApi service', () => {
         '/api/v1/public/qr/q_validCampaignCode1234',
         expect.objectContaining({
           credentials: 'include',
-          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         })
       );
+      // Bodyless GET requests must NOT declare Content-Type: application/json
+      const lastCall = (globalThis.fetch as any).mock.calls[0];
+      expect(lastCall[1]?.headers?.['Content-Type']).toBeUndefined();
       expect(result).toEqual(mockDTO);
     });
 
@@ -103,7 +105,7 @@ describe('publicApi service', () => {
   });
 
   describe('createPublicSession', () => {
-    it('should issue POST request with credentials included', async () => {
+    it('should issue POST request with credentials included and avoid sending Content-Type for bodyless request', async () => {
       const mockResponse = {
         expiresAt: new Date().toISOString(),
       };
@@ -122,6 +124,9 @@ describe('publicApi service', () => {
           credentials: 'include',
         })
       );
+      const call = (globalThis.fetch as any).mock.calls[0];
+      expect(call[1]?.headers?.['Content-Type']).toBeUndefined();
+      expect(call[1]?.body).toBeUndefined();
       expect(result).toEqual(mockResponse);
     });
   });

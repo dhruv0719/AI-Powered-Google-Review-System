@@ -15,13 +15,16 @@ import { publicApi } from './services/publicApi.js';
 const API_BASE = '/api/v1';
 
 export async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const hasBody = options.body !== undefined && options.body !== null;
+  const headers: Record<string, string> = {
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(options.headers as Record<string, string>),
+  };
+
   const res = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   });
 
   const data = await res.json().catch(() => ({}));

@@ -62,13 +62,16 @@ export function isTransientColdStartError(err: unknown): boolean {
 }
 
 async function publicRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const hasBody = options.body !== undefined && options.body !== null;
+  const headers: Record<string, string> = {
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(options.headers as Record<string, string>),
+  };
+
   const res = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   });
 
   const data = await res.json().catch(() => ({}));
