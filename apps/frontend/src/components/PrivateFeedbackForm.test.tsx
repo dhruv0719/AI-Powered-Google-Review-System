@@ -166,6 +166,25 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
     ).toBeInTheDocument();
   });
 
+  it('6b. should avoid keystroke spam when session creation fails', async () => {
+    const sessionSpy = vi
+      .spyOn(publicApi, 'createPublicSession')
+      .mockRejectedValue(new PublicApiError('Session service error', 500));
+
+    render(<PrivateFeedbackForm {...defaultProps} />);
+
+    const textarea = screen.getByPlaceholderText(/share details/i);
+    // User types multiple characters in sequence
+    fireEvent.change(textarea, { target: { value: 'H' } });
+    fireEvent.change(textarea, { target: { value: 'He' } });
+    fireEvent.change(textarea, { target: { value: 'Hel' } });
+    fireEvent.change(textarea, { target: { value: 'Hell' } });
+    fireEvent.change(textarea, { target: { value: 'Hello' } });
+
+    // Despite 5 keystrokes, session creation is attempted only once and not spammed
+    expect(sessionSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('7. should prevent duplicate submissions via synchronous ref lock when user clicks submit repeatedly', async () => {
     vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
       expiresAt: new Date().toISOString(),

@@ -515,7 +515,7 @@ export function AiDraftAssistant({
       )}
 
       {/* Helper text when input < 10 characters */}
-      {isBrowserSupported && !hasMinimumText && graphemeCount !== null && graphemeCount > 0 && (
+      {isBrowserSupported && !hasMinimumText && (
         <p
           data-testid="ai-min-chars-hint"
           style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}

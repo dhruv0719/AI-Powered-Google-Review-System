@@ -50,6 +50,7 @@ export function PrivateFeedbackForm({
 
   // In-flight session creation promise ref to prevent duplicate/racing session requests
   const sessionPromiseRef = useRef<Promise<unknown> | null>(null);
+  const sessionFailedRef = useRef(false);
   // Synchronous submission lock to prevent duplicate executions before React re-renders
   const isSubmittingRef = useRef(false);
   // Tracks immutable snapshot of pending in-flight submission for server-verifiable idempotency
@@ -73,14 +74,20 @@ export function PrivateFeedbackForm({
       }
     }
 
+    if (sessionFailedRef.current && !forceRenew) {
+      return false;
+    }
+
     const promise = publicApi.createPublicSession(code);
     sessionPromiseRef.current = promise;
 
     try {
       await promise;
       setSessionInitiated(true);
+      sessionFailedRef.current = false;
       return true;
     } catch {
+      sessionFailedRef.current = true;
       return false;
     } finally {
       sessionPromiseRef.current = null;
@@ -89,12 +96,14 @@ export function PrivateFeedbackForm({
 
   const handleRatingClick = (stars: number) => {
     if (isFormLocked) return;
+    sessionFailedRef.current = false;
     ensureSession();
     setRating(stars);
   };
 
   const toggleService = (serviceId: string) => {
     if (isFormLocked) return;
+    sessionFailedRef.current = false;
     ensureSession();
     setSelectedServiceIds((prev) =>
       prev.includes(serviceId) ? prev.filter((id) => id !== serviceId) : [...prev, serviceId]
@@ -113,7 +122,9 @@ export function PrivateFeedbackForm({
 
   const handleRequestSessionRenew = async (): Promise<boolean> => {
     sessionPromiseRef.current = null;
+    sessionFailedRef.current = false;
     setSessionInitiated(false);
+    setError(null);
     const success = await ensureSession(true);
     if (success) {
       if (submissionStatus === 'session_expired') {
