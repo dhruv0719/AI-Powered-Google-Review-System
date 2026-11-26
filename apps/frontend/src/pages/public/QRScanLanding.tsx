@@ -88,10 +88,20 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
   const [data, setData] = useState<PublicQRResolutionDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [coldStartState, setColdStartState] = useState<{
+    isColdStart: boolean;
+    attempt: number;
+    maxAttempts: number;
+  }>({
+    isColdStart: false,
+    attempt: 1,
+    maxAttempts: 6,
+  });
 
   // Guards against race conditions and overlapping requests
   const requestIdRef = useRef(0);
   const inFlightRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const loadCampaign = useCallback(async () => {
     if (!code) {
@@ -99,6 +109,13 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
       setError('This review link is invalid, expired, or inactive.');
       return;
     }
+
+    // Cancel any previous pending resolution attempt
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     // Prevent overlapping resolution requests
     if (inFlightRef.current) {
@@ -109,9 +126,21 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
     const currentRequestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
+    setColdStartState({ isColdStart: false, attempt: 1, maxAttempts: 6 });
 
     try {
-      const res = await publicApi.resolvePublicCampaign(code);
+      const res = await publicApi.resolvePublicCampaign(code, {
+        signal: abortController.signal,
+        onProgress: (info) => {
+          if (currentRequestId === requestIdRef.current) {
+            setColdStartState({
+              isColdStart: true,
+              attempt: info.attempt,
+              maxAttempts: info.maxAttempts,
+            });
+          }
+        },
+      });
 
       // Discard response if a newer request has started
       if (currentRequestId !== requestIdRef.current) {
@@ -130,6 +159,9 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
       if (currentRequestId !== requestIdRef.current) {
         return;
       }
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
       setData(null);
       setError(mapCustomerErrorMessage(err));
     } finally {
@@ -144,12 +176,79 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
     loadCampaign();
 
     return () => {
-      // Invalidate any in-flight response on unmount
+      // Invalidate any in-flight response and abort on unmount
       requestIdRef.current++;
+      abortControllerRef.current?.abort();
     };
   }, [loadCampaign]);
 
   if (loading) {
+    if (coldStartState.isColdStart) {
+      return (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="cold-start-progress"
+          style={{
+            width: '100%',
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            padding: '36px 24px',
+            textAlign: 'center',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div style={{ fontSize: '36px', marginBottom: '14px' }} aria-hidden="true">&#9749;</div>
+          <h1 style={{ margin: '0 0 8px 0', fontSize: '20px', color: '#111827', fontWeight: 700 }}>
+            Connecting to Review Portal
+          </h1>
+          <p style={{ margin: '0 0 14px 0', fontSize: '15px', color: '#4b5563', lineHeight: 1.5 }}>
+            Waking up server (~30s on first load)...
+          </p>
+          <div
+            style={{
+              display: 'inline-block',
+              padding: '6px 14px',
+              backgroundColor: '#f3f4f6',
+              borderRadius: '20px',
+              fontSize: '13px',
+              color: '#4b5563',
+              fontWeight: 500,
+              marginBottom: '20px',
+            }}
+          >
+            Attempt {coldStartState.attempt} of {coldStartState.maxAttempts} • Please keep page open
+          </div>
+          <div>
+            <button
+              type="button"
+              data-testid="cold-start-retry-now"
+              className="touch-press"
+              onClick={() => {
+                inFlightRef.current = false;
+                loadCampaign();
+              }}
+              style={{
+                minHeight: '44px',
+                minWidth: '120px',
+                padding: '10px 20px',
+                backgroundColor: '#f3f4f6',
+                color: '#374151',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Retry Connection Now
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         role="status"
@@ -192,7 +291,10 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
           type="button"
           data-testid="retry-button"
           className="touch-press"
-          onClick={loadCampaign}
+          onClick={() => {
+            inFlightRef.current = false;
+            loadCampaign();
+          }}
           disabled={loading}
           style={{
             marginTop: '20px',

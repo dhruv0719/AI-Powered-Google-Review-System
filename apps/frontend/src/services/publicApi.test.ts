@@ -315,4 +315,121 @@ describe('publicApi service', () => {
       ).rejects.toThrow('Failed to fetch');
     });
   });
+
+  describe('cold-start retry behavior on resolvePublicCampaign', () => {
+    it('should retry on 502/503/504 and succeed when server wakes up', async () => {
+      const mockDTO = {
+        tenant: { displayName: 'Cold Start Cafe', brandColor: '#2563EB' },
+        location: {
+          name: 'Main Cafe',
+          address: '456 Wake Street',
+          city: 'Bangalore',
+          googleReviewUrl: 'https://g.page/r/coldstart/review',
+        },
+        services: [],
+      };
+
+      let calls = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        calls++;
+        if (calls === 1) {
+          return {
+            ok: false,
+            status: 502,
+            json: async () => ({ error: { message: 'Bad Gateway' } }),
+          } as Response;
+        }
+        if (calls === 2) {
+          return {
+            ok: false,
+            status: 503,
+            json: async () => ({ error: { message: 'Service Unavailable' } }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => mockDTO,
+        } as Response;
+      });
+
+      const progressEvents: any[] = [];
+      const result = await publicApi.resolvePublicCampaign('q_coldStartTest', {
+        retryDelays: [10, 10], // Fast test delays
+        onProgress: (p) => progressEvents.push(p),
+      });
+
+      expect(calls).toBe(3);
+      expect(result).toEqual(mockDTO);
+      expect(progressEvents.length).toBe(2);
+      expect(progressEvents[0].attempt).toBe(2);
+      expect(progressEvents[0].isColdStart).toBe(true);
+      expect(progressEvents[1].attempt).toBe(3);
+    });
+
+    it('should retry on network TypeError and succeed', async () => {
+      const mockDTO = {
+        tenant: { displayName: 'Network Cafe', brandColor: '#2563EB' },
+        location: {
+          name: 'Network Location',
+          address: '101 Ping Way',
+          city: 'Mumbai',
+          googleReviewUrl: 'https://g.page/r/network/review',
+        },
+        services: [],
+      };
+
+      let calls = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        calls++;
+        if (calls === 1) {
+          throw new TypeError('Failed to fetch (Render cold boot)');
+        }
+        return {
+          ok: true,
+          json: async () => mockDTO,
+        } as Response;
+      });
+
+      const result = await publicApi.resolvePublicCampaign('q_networkTest', {
+        retryDelays: [10],
+      });
+
+      expect(calls).toBe(2);
+      expect(result).toEqual(mockDTO);
+    });
+
+    it('should exhaust retries and throw PublicApiError when server remains unavailable', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: async () => ({ error: { message: 'Bad Gateway' } }),
+      } as Response);
+
+      await expect(
+        publicApi.resolvePublicCampaign('q_downServer', {
+          retryDelays: [5, 5],
+        })
+      ).rejects.toThrow(PublicApiError);
+    });
+
+    it('should NOT retry on 400, 403, 404, or 429 errors', async () => {
+      let calls = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async () => {
+        calls++;
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({ error: { code: 'CAMPAIGN_NOT_FOUND', message: 'Not Found' } }),
+        } as Response;
+      });
+
+      await expect(
+        publicApi.resolvePublicCampaign('q_notFound', {
+          retryDelays: [10, 10],
+        })
+      ).rejects.toThrow(PublicApiError);
+
+      expect(calls).toBe(1); // Exact single call - no cold start retry
+    });
+  });
 });
