@@ -16,8 +16,8 @@ export function PublicCustomerLayout() {
       id="main-content"
       style={{
         minHeight: '100vh',
-        backgroundColor: '#f3f4f6',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
+        backgroundColor: '#F6FAF9',
+        fontFamily: "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif",
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -47,11 +47,13 @@ export function PublicCustomerLayout() {
         style={{
           marginTop: 'auto',
           paddingTop: '24px',
+          paddingBottom: '8px',
           textAlign: 'center',
           fontSize: '12px',
-          color: '#9ca3af',
+          color: '#707978',
           width: '100%',
           userSelect: 'none',
+          letterSpacing: '0.02em',
         }}
       >
         Powered by Review System
