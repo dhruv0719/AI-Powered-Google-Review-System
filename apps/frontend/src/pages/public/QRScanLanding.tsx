@@ -183,31 +183,55 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
           data-testid="cold-start-progress"
           style={{
             width: '100%',
-            backgroundColor: '#fff',
-            borderRadius: '12px',
+            backgroundColor: '#ffffff',
+            borderRadius: '20px',
             padding: '36px 24px',
             textAlign: 'center',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+            boxShadow: '0 10px 30px -5px rgba(0, 103, 100, 0.07), 0 4px 10px -2px rgba(0, 0, 0, 0.03)',
+            border: '1px solid #E2ECEB',
             boxSizing: 'border-box',
           }}
         >
-          <div style={{ fontSize: '36px', marginBottom: '14px' }} aria-hidden="true">&#9749;</div>
-          <h1 style={{ margin: '0 0 8px 0', fontSize: '20px', color: '#111827', fontWeight: 700 }}>
+          <div
+            style={{
+              width: '56px',
+              height: '56px',
+              margin: '0 auto 16px auto',
+              backgroundColor: '#E7F3F1',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '28px',
+            }}
+            aria-hidden="true"
+          >
+            &#9749;
+          </div>
+          <h1
+            style={{
+              margin: '0 0 8px 0',
+              fontFamily: "'Radio Canada Big', sans-serif",
+              fontSize: '22px',
+              color: '#181C1C',
+              fontWeight: 700,
+            }}
+          >
             Connecting to Review Portal
           </h1>
-          <p style={{ margin: '0 0 14px 0', fontSize: '15px', color: '#4b5563', lineHeight: 1.5 }}>
+          <p style={{ margin: '0 0 16px 0', fontSize: '15px', color: '#3E4948', lineHeight: 1.5 }}>
             Waking up server (~30s on first load)...
           </p>
           <div
             style={{
               display: 'inline-block',
-              padding: '6px 14px',
-              backgroundColor: '#f3f4f6',
+              padding: '6px 16px',
+              backgroundColor: '#E7F3F1',
               borderRadius: '20px',
               fontSize: '13px',
-              color: '#4b5563',
-              fontWeight: 500,
-              marginBottom: '20px',
+              color: '#006764',
+              fontWeight: 600,
+              marginBottom: '24px',
             }}
           >
             Attempt {coldStartState.attempt} of {coldStartState.maxAttempts} • Please keep page open
@@ -220,12 +244,12 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
               onClick={loadCampaign}
               style={{
                 minHeight: '44px',
-                minWidth: '120px',
-                padding: '10px 20px',
-                backgroundColor: '#f3f4f6',
-                color: '#374151',
-                border: '1px solid #d1d5db',
-                borderRadius: '8px',
+                minWidth: '140px',
+                padding: '10px 22px',
+                backgroundColor: '#ffffff',
+                color: '#006764',
+                border: '1.5px solid #006764',
+                borderRadius: '10px',
                 fontSize: '14px',
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -243,13 +267,34 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
         role="status"
         aria-live="polite"
         style={{
+          width: '100%',
+          backgroundColor: '#ffffff',
+          borderRadius: '20px',
+          padding: '48px 24px',
           textAlign: 'center',
-          padding: '40px 16px',
-          color: '#4b5563',
-          fontSize: '15px',
+          boxShadow: '0 10px 30px -5px rgba(0, 103, 100, 0.07), 0 4px 10px -2px rgba(0, 0, 0, 0.03)',
+          border: '1px solid #E2ECEB',
+          boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '16px',
         }}
       >
-        Loading customer review page...
+        <div
+          style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '50%',
+            border: '3px solid #E7F3F1',
+            borderTopColor: '#006764',
+            animation: 'spin 1s linear infinite',
+          }}
+          aria-hidden="true"
+        />
+        <p style={{ margin: 0, color: '#3E4948', fontSize: '15px', fontWeight: 500 }}>
+          Loading customer review page...
+        </p>
       </div>
     );
   }
@@ -260,19 +305,44 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
         role="alert"
         style={{
           width: '100%',
-          backgroundColor: '#fff',
-          borderRadius: '12px',
-          padding: '32px 24px',
+          backgroundColor: '#ffffff',
+          borderRadius: '20px',
+          padding: '36px 24px',
           textAlign: 'center',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          boxShadow: '0 10px 30px -5px rgba(0, 103, 100, 0.07), 0 4px 10px -2px rgba(0, 0, 0, 0.03)',
+          border: '1px solid #E2ECEB',
           boxSizing: 'border-box',
         }}
       >
-        <div style={{ fontSize: '40px', marginBottom: '12px' }} aria-hidden="true">&#9888;</div>
-        <h1 style={{ margin: '0 0 8px 0', fontSize: '20px', color: '#111827', fontWeight: 700 }}>
+        <div
+          style={{
+            width: '56px',
+            height: '56px',
+            margin: '0 auto 16px auto',
+            backgroundColor: '#FEF2F2',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '28px',
+            color: '#B91C1C',
+          }}
+          aria-hidden="true"
+        >
+          &#9888;
+        </div>
+        <h1
+          style={{
+            margin: '0 0 8px 0',
+            fontFamily: "'Radio Canada Big', sans-serif",
+            fontSize: '22px',
+            color: '#181C1C',
+            fontWeight: 700,
+          }}
+        >
           Review Page Unavailable
         </h1>
-        <p style={{ margin: 0, fontSize: '14px', color: '#4b5563', lineHeight: 1.5 }}>
+        <p style={{ margin: 0, fontSize: '14px', color: '#3E4948', lineHeight: 1.5 }}>
           {error || 'This review link is invalid, expired, or inactive.'}
         </p>
 
@@ -283,20 +353,21 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
           onClick={loadCampaign}
           disabled={loading}
           style={{
-            marginTop: '20px',
+            marginTop: '24px',
             minHeight: '44px',
-            minWidth: '120px',
+            minWidth: '140px',
             padding: '12px 24px',
-            backgroundColor: '#2563eb',
+            backgroundColor: '#006764',
             color: '#ffffff',
             border: 'none',
-            borderRadius: '8px',
+            borderRadius: '10px',
             fontSize: '15px',
             fontWeight: 600,
             cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
+            boxShadow: '0 2px 8px rgba(0, 103, 100, 0.2)',
           }}
         >
           Try Again
@@ -315,58 +386,90 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
     <div
       style={{
         width: '100%',
+        backgroundColor: '#ffffff',
+        borderRadius: '24px',
+        padding: '28px 22px',
+        boxShadow: '0 10px 30px -5px rgba(0, 103, 100, 0.07), 0 4px 10px -2px rgba(0, 0, 0, 0.03)',
+        border: '1px solid #E2ECEB',
+        boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
-        gap: '16px',
+        gap: '24px',
       }}
     >
       {/* Business Branding Header */}
       <header
         style={{
-          backgroundColor: '#fff',
-          borderRadius: '12px',
-          padding: '24px 20px',
           textAlign: 'center',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-          borderTop: `4px solid ${brandColor}`,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
         }}
       >
+        {/* Storefront Avatar Badge */}
+        <div
+          style={{
+            width: '60px',
+            height: '60px',
+            borderRadius: '50%',
+            backgroundColor: '#E7F3F1',
+            border: '2px solid #D1E5E3',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '14px',
+            boxShadow: '0 2px 6px rgba(0, 103, 100, 0.08)',
+          }}
+          aria-hidden="true"
+        >
+          <span style={{ fontSize: '28px' }}>&#127978;</span>
+        </div>
+
         <h1
           data-testid="business-name"
           style={{
             margin: '0 0 6px 0',
-            fontSize: '22px',
-            color: '#111827',
+            fontFamily: "'Radio Canada Big', sans-serif",
+            fontSize: '24px',
+            color: '#181C1C',
             fontWeight: 700,
             lineHeight: 1.25,
             wordBreak: 'break-word',
+            letterSpacing: '-0.01em',
           }}
         >
           {data.tenant.displayName}
         </h1>
+
         <p
           data-testid="location-name"
           style={{
             margin: '0 0 4px 0',
             fontSize: '15px',
-            color: '#374151',
+            color: brandColor || '#006764',
             fontWeight: 600,
             lineHeight: 1.3,
           }}
         >
           {data.location.name}
         </p>
+
         {locationAddress && (
           <p
             data-testid="location-address"
             style={{
               margin: 0,
               fontSize: '13px',
-              color: '#4b5563', // WCAG AA compliant >= 4.5:1 contrast against #ffffff
+              color: '#3E4948',
               lineHeight: 1.4,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
             }}
           >
-            {locationAddress}
+            <span aria-hidden="true" style={{ fontSize: '12px' }}>&#128205;</span>
+            <span>{locationAddress}</span>
           </p>
         )}
       </header>
@@ -375,41 +478,62 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
       <section
         aria-label="Google Review Action"
         style={{
-          backgroundColor: '#fff',
-          borderRadius: '12px',
-          padding: '24px 20px',
+          backgroundColor: '#F0F7F6',
+          borderRadius: '16px',
+          padding: '22px 18px',
           textAlign: 'center',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-          border: `2px solid ${brandColor}`,
+          border: '1px solid #D1E5E3',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
         }}
       >
+        {/* 5 Prominent Gold Stars */}
         <div
-          style={{ display: 'inline-block', fontSize: '32px', marginBottom: '8px' }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '4px',
+            fontSize: '24px',
+            color: '#F59E0B',
+            marginBottom: '8px',
+            lineHeight: 1,
+          }}
           aria-hidden="true"
         >
-          &#11088;
+          <span>&#9733;</span>
+          <span>&#9733;</span>
+          <span>&#9733;</span>
+          <span>&#9733;</span>
+          <span>&#9733;</span>
         </div>
+
         <h2
           style={{
-            margin: '0 0 8px 0',
-            fontSize: '18px',
-            color: '#111827',
-            fontWeight: 600,
+            margin: '0 0 6px 0',
+            fontFamily: "'Radio Canada Big', sans-serif",
+            fontSize: '19px',
+            color: '#181C1C',
+            fontWeight: 700,
             lineHeight: 1.3,
           }}
         >
           Support Us on Google
         </h2>
+
         <p
           style={{
-            margin: '0 0 16px 0',
+            margin: '0 0 18px 0',
             fontSize: '14px',
-            color: '#4b5563',
+            color: '#3E4948',
             lineHeight: 1.45,
+            maxWidth: '380px',
           }}
         >
           Public Google reviews directly support our staff and help other customers find us!
         </p>
+
         <a
           data-testid="google-review-cta"
           className="touch-press"
@@ -420,32 +544,72 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            gap: '8px',
             width: '100%',
-            minHeight: '48px', // WCAG 2.5.5 touch target >= 44x44px (48px thumb standard)
+            minHeight: '48px',
             padding: '14px 20px',
-            backgroundColor: brandColor,
-            color: ctaTextColor, // Mathematically calculated contrast >= 4.5:1
-            borderRadius: '8px',
+            backgroundColor: brandColor || '#006764',
+            color: ctaTextColor,
+            borderRadius: '12px',
             textDecoration: 'none',
             fontSize: '16px',
             fontWeight: 600,
-            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.12)',
+            boxShadow: '0 4px 12px rgba(0, 103, 100, 0.18)',
             userSelect: 'none',
+            boxSizing: 'border-box',
           }}
         >
-          Write a Review on Google &#8599;
+          <span>Write a Review on Google</span>
+          <span aria-hidden="true">&#8599;</span>
         </a>
       </section>
+
+      {/* Elegant Section Divider */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          position: 'relative',
+          margin: '4px 0',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            height: '1px',
+            backgroundColor: '#E2ECEB',
+          }}
+        />
+        <div
+          style={{
+            position: 'relative',
+            backgroundColor: '#ffffff',
+            padding: '4px 14px',
+            borderRadius: '9999px',
+            border: '1px solid #E2ECEB',
+            fontSize: '12px',
+            fontWeight: 600,
+            color: '#3E4948',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <span aria-hidden="true">&#128274;</span>
+          <span>Private Feedback</span>
+        </div>
+      </div>
 
       {/* 3. Direct Private Customer Feedback Section */}
       <section
         aria-label="Private Feedback to Management"
         data-testid="private-feedback-card"
         style={{
-          backgroundColor: '#fff',
-          borderRadius: '12px',
-          padding: '24px 20px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+          width: '100%',
+          boxSizing: 'border-box',
         }}
       >
         <PrivateFeedbackForm

@@ -4,7 +4,6 @@ import {
   ErrorCodes,
 } from '@review-system/shared';
 import { publicApi, PublicApiError } from '../services/publicApi.js';
-import { getContrastingTextColor } from '../utils/contrast.js';
 
 export interface AiDraftAssistantProps {
   code: string;
@@ -451,20 +450,18 @@ export function AiDraftAssistant({
     return null;
   }
 
-  const contrastColor = getContrastingTextColor(brandColor);
-
   return (
     <div
       data-testid="ai-draft-assistant"
       style={{
-        marginTop: '12px',
+        marginTop: '14px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '10px',
+        gap: '12px',
       }}
     >
       {/* Action / Trigger Bar */}
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <button
           type="button"
           data-testid="polish-draft-button"
@@ -473,19 +470,22 @@ export function AiDraftAssistant({
           className="touch-press"
           style={{
             minHeight: '44px',
-            padding: '10px 18px',
-            borderRadius: '8px',
+            padding: '10px 20px',
+            borderRadius: '10px',
             fontSize: '14px',
             fontWeight: 600,
-            border: `1px solid ${brandColor}`,
+            border:
+              !isBrowserSupported || !hasMinimumText || isGenerating || isQuotaExhausted || disabled
+                ? '1px solid #E2ECEB'
+                : '1.5px solid #61B9B5',
             backgroundColor:
               !isBrowserSupported || !hasMinimumText || isGenerating || isQuotaExhausted || disabled
-                ? '#f3f4f6'
-                : brandColor,
+                ? '#F6FAF9'
+                : '#E7F3F1',
             color:
               !isBrowserSupported || !hasMinimumText || isGenerating || isQuotaExhausted || disabled
-                ? '#9ca3af'
-                : contrastColor,
+                ? '#707978'
+                : (brandColor || '#006764'),
             cursor:
               !isBrowserSupported || !hasMinimumText || isGenerating || isQuotaExhausted || disabled
                 ? 'not-allowed'
@@ -493,21 +493,31 @@ export function AiDraftAssistant({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '6px',
-            transition: 'background-color 0.15s ease, opacity 0.15s ease',
+            gap: '8px',
+            boxShadow:
+              !isBrowserSupported || !hasMinimumText || isGenerating || isQuotaExhausted || disabled
+                ? 'none'
+                : '0 2px 6px rgba(0, 103, 100, 0.08)',
+            transition: 'all 0.15s ease',
           }}
         >
           <span aria-hidden="true">&#10024;</span>
           <span>{isGenerating ? 'Polishing Draft...' : 'Polish with AI'}</span>
         </button>
 
-        {/* Quota Presentation: Neutral initially; Authoritative once known */}
+        {/* Quota Presentation: Soft pill badge */}
         <span
           data-testid="ai-quota-indicator"
           style={{
             fontSize: '12px',
-            color: isQuotaExhausted ? '#dc2626' : '#6b7280',
-            fontWeight: isQuotaExhausted ? 600 : 400,
+            color: isQuotaExhausted ? '#B91C1C' : '#006764',
+            fontWeight: 600,
+            backgroundColor: isQuotaExhausted ? '#FEF2F2' : '#F0F7F6',
+            border: isQuotaExhausted ? '1px solid #FECACA' : '1px solid #D1E5E3',
+            padding: '5px 12px',
+            borderRadius: '20px',
+            display: 'inline-flex',
+            alignItems: 'center',
           }}
         >
           {authoritativeQuota === null
@@ -522,7 +532,7 @@ export function AiDraftAssistant({
       {!isBrowserSupported && (
         <p
           data-testid="ai-unsupported-browser-hint"
-          style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}
+          style={{ margin: 0, fontSize: '12px', color: '#707978' }}
         >
           AI review assistant is not supported in this browser. Please update your browser to use this feature.
         </p>
@@ -532,7 +542,7 @@ export function AiDraftAssistant({
       {isBrowserSupported && !hasMinimumText && (
         <p
           data-testid="ai-min-chars-hint"
-          style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}
+          style={{ margin: 0, fontSize: '12px', color: '#707978' }}
         >
           Enter at least 10 characters to polish with AI.
         </p>
@@ -545,18 +555,30 @@ export function AiDraftAssistant({
           aria-live="polite"
           data-testid="ai-generating-indicator"
           style={{
-            padding: '12px',
-            backgroundColor: '#eff6ff',
-            borderRadius: '8px',
-            border: '1px solid #bfdbfe',
+            padding: '14px 16px',
+            backgroundColor: '#E7F3F1',
+            borderRadius: '10px',
+            border: '1px solid #A2D5D1',
             fontSize: '13px',
-            color: '#1e40af',
+            color: '#006764',
+            fontWeight: 500,
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
+            gap: '10px',
           }}
         >
-          <span aria-hidden="true">&#9203;</span>
+          <span
+            style={{
+              width: '16px',
+              height: '16px',
+              borderRadius: '50%',
+              border: '2px solid #A2D5D1',
+              borderTopColor: '#006764',
+              animation: 'spin 1s linear infinite',
+              display: 'inline-block',
+            }}
+            aria-hidden="true"
+          />
           <span>Polishing your feedback into a review draft...</span>
         </div>
       )}
@@ -568,13 +590,13 @@ export function AiDraftAssistant({
           aria-live="polite"
           data-testid="ai-insufficient-context"
           style={{
-            padding: '12px',
-            backgroundColor: '#fffbeb',
-            borderRadius: '8px',
-            border: '1px solid #fde68a',
+            padding: '14px 16px',
+            backgroundColor: '#FFFBEB',
+            borderRadius: '10px',
+            border: '1px solid #FDE68A',
             fontSize: '13px',
-            color: '#92400e',
-            lineHeight: 1.4,
+            color: '#92400E',
+            lineHeight: 1.45,
           }}
         >
           {insufficientContextNotice}
@@ -588,15 +610,15 @@ export function AiDraftAssistant({
           aria-live="assertive"
           data-testid="ai-error-notice"
           style={{
-            padding: '12px',
-            backgroundColor: '#fef2f2',
-            borderRadius: '8px',
-            border: '1px solid #fecaca',
+            padding: '14px 16px',
+            backgroundColor: '#FEF2F2',
+            borderRadius: '10px',
+            border: '1px solid #FECACA',
             fontSize: '13px',
-            color: '#b91c1c',
+            color: '#B91C1C',
             display: 'flex',
             flexDirection: 'column',
-            gap: '8px',
+            gap: '10px',
           }}
         >
           <span>{errorMessage}</span>
@@ -611,10 +633,10 @@ export function AiDraftAssistant({
                 alignSelf: 'flex-start',
                 minHeight: '36px',
                 padding: '6px 14px',
-                borderRadius: '6px',
+                borderRadius: '8px',
                 fontSize: '13px',
                 fontWeight: 600,
-                backgroundColor: isRenewingSession ? '#9ca3af' : '#b91c1c',
+                backgroundColor: isRenewingSession ? '#BDC9C7' : '#B91C1C',
                 color: '#ffffff',
                 border: 'none',
                 cursor: isRenewingSession ? 'not-allowed' : 'pointer',
@@ -634,10 +656,10 @@ export function AiDraftAssistant({
                 alignSelf: 'flex-start',
                 minHeight: '36px',
                 padding: '6px 14px',
-                borderRadius: '6px',
+                borderRadius: '8px',
                 fontSize: '13px',
                 fontWeight: 600,
-                backgroundColor: isGenerating || isRateLimitedCooldown ? '#9ca3af' : '#b91c1c',
+                backgroundColor: isGenerating || isRateLimitedCooldown ? '#BDC9C7' : '#B91C1C',
                 color: '#ffffff',
                 border: 'none',
                 cursor: isGenerating || isRateLimitedCooldown ? 'not-allowed' : 'pointer',
@@ -656,13 +678,14 @@ export function AiDraftAssistant({
           aria-label="AI Generated Review Draft"
           data-testid="ai-draft-card"
           style={{
-            padding: '16px',
-            backgroundColor: '#f8fafc',
-            borderRadius: '10px',
-            border: isDraftStale ? '1px dashed #f59e0b' : '1px solid #cbd5e1',
+            padding: '18px 20px',
+            backgroundColor: '#F8FCFB',
+            borderRadius: '14px',
+            border: isDraftStale ? '1.5px dashed #F59E0B' : '1px solid #A2D5D1',
             display: 'flex',
             flexDirection: 'column',
-            gap: '12px',
+            gap: '14px',
+            boxShadow: '0 2px 8px rgba(0, 103, 100, 0.05)',
           }}
         >
           {/* Card Header & Badges */}
@@ -675,8 +698,8 @@ export function AiDraftAssistant({
               gap: '6px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#181C1C' }}>
                 AI Suggested Draft
               </span>
               {hasAppliedDraft && (
@@ -685,10 +708,11 @@ export function AiDraftAssistant({
                   style={{
                     fontSize: '11px',
                     fontWeight: 600,
-                    padding: '2px 8px',
+                    padding: '3px 10px',
                     borderRadius: '9999px',
-                    backgroundColor: '#dcfce7',
-                    color: '#166534',
+                    backgroundColor: '#E7F3F1',
+                    color: '#006764',
+                    border: '1px solid #A2D5D1',
                   }}
                 >
                   Applied
@@ -702,10 +726,11 @@ export function AiDraftAssistant({
                 style={{
                   fontSize: '11px',
                   fontWeight: 600,
-                  padding: '2px 8px',
+                  padding: '3px 10px',
                   borderRadius: '9999px',
-                  backgroundColor: '#fef3c7',
-                  color: '#92400e',
+                  backgroundColor: '#FEF3C7',
+                  color: '#92400E',
+                  border: '1px solid #FDE68A',
                 }}
               >
                 Comments or selections changed
@@ -722,13 +747,15 @@ export function AiDraftAssistant({
               rows={4}
               style={{
                 width: '100%',
-                padding: '10px',
-                borderRadius: '6px',
-                border: '1px solid #94a3b8',
+                padding: '12px 14px',
+                borderRadius: '10px',
+                border: '1.5px solid #006764',
                 fontSize: '15px',
-                lineHeight: 1.4,
+                lineHeight: 1.5,
                 boxSizing: 'border-box',
                 fontFamily: 'inherit',
+                color: '#181C1C',
+                backgroundColor: '#ffffff',
               }}
             />
           ) : (
@@ -737,8 +764,8 @@ export function AiDraftAssistant({
               style={{
                 margin: 0,
                 fontSize: '15px',
-                color: '#334155',
-                lineHeight: 1.5,
+                color: '#181C1C',
+                lineHeight: 1.55,
                 wordBreak: 'break-word',
               }}
             >
@@ -754,11 +781,12 @@ export function AiDraftAssistant({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '8px 12px',
-                backgroundColor: '#fffbeb',
-                borderRadius: '6px',
+                padding: '10px 14px',
+                backgroundColor: '#FFFBEB',
+                borderRadius: '8px',
+                border: '1px solid #FDE68A',
                 fontSize: '12px',
-                color: '#92400e',
+                color: '#92400E',
                 gap: '8px',
               }}
             >
@@ -771,11 +799,11 @@ export function AiDraftAssistant({
                 className="touch-press"
                 style={{
                   minHeight: '32px',
-                  padding: '4px 10px',
+                  padding: '4px 12px',
                   borderRadius: '6px',
                   fontSize: '12px',
                   fontWeight: 600,
-                  backgroundColor: '#d97706',
+                  backgroundColor: '#D97706',
                   color: '#ffffff',
                   border: 'none',
                   cursor: 'pointer',
@@ -805,17 +833,18 @@ export function AiDraftAssistant({
               className="touch-press"
               style={{
                 minHeight: '44px',
-                padding: '8px 16px',
-                borderRadius: '6px',
+                padding: '10px 18px',
+                borderRadius: '10px',
                 fontSize: '13px',
                 fontWeight: 600,
-                backgroundColor: copiedToast ? '#16a34a' : '#0f172a',
+                backgroundColor: copiedToast ? '#16A34A' : (brandColor || '#006764'),
                 color: '#ffffff',
                 border: 'none',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
+                boxShadow: '0 2px 6px rgba(0, 103, 100, 0.15)',
                 transition: 'background-color 0.15s ease',
               }}
             >
@@ -832,13 +861,13 @@ export function AiDraftAssistant({
               data-testid="ai-open-google-button"
               style={{
                 minHeight: '44px',
-                padding: '8px 16px',
-                borderRadius: '6px',
+                padding: '10px 16px',
+                borderRadius: '10px',
                 fontSize: '13px',
                 fontWeight: 600,
                 backgroundColor: '#ffffff',
-                color: brandColor,
-                border: `1px solid ${brandColor}`,
+                color: brandColor || '#006764',
+                border: `1.5px solid ${brandColor || '#006764'}`,
                 textDecoration: 'none',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -860,13 +889,13 @@ export function AiDraftAssistant({
                 className="touch-press"
                 style={{
                   minHeight: '44px',
-                  padding: '8px 14px',
-                  borderRadius: '6px',
+                  padding: '10px 16px',
+                  borderRadius: '10px',
                   fontSize: '13px',
                   fontWeight: 600,
                   backgroundColor: '#ffffff',
-                  color: '#b91c1c',
-                  border: '1px solid #fca5a5',
+                  color: '#B91C1C',
+                  border: '1.5px solid #FCA5A5',
                   cursor: 'pointer',
                 }}
               >
@@ -880,13 +909,13 @@ export function AiDraftAssistant({
                 className="touch-press"
                 style={{
                   minHeight: '44px',
-                  padding: '8px 14px',
-                  borderRadius: '6px',
+                  padding: '10px 16px',
+                  borderRadius: '10px',
                   fontSize: '13px',
                   fontWeight: 600,
-                  backgroundColor: '#ffffff',
-                  color: '#1e40af',
-                  border: '1px solid #93c5fd',
+                  backgroundColor: '#E7F3F1',
+                  color: brandColor || '#006764',
+                  border: '1.5px solid #61B9B5',
                   cursor: 'pointer',
                 }}
               >
@@ -902,12 +931,12 @@ export function AiDraftAssistant({
               className="touch-press"
               style={{
                 minHeight: '44px',
-                padding: '8px 12px',
-                borderRadius: '6px',
+                padding: '10px 14px',
+                borderRadius: '10px',
                 fontSize: '13px',
-                color: '#475569',
-                backgroundColor: 'transparent',
-                border: '1px solid #cbd5e1',
+                color: '#3E4948',
+                backgroundColor: '#ffffff',
+                border: '1px solid #BDC9C7',
                 cursor: 'pointer',
               }}
             >
@@ -922,10 +951,10 @@ export function AiDraftAssistant({
               className="touch-press"
               style={{
                 minHeight: '44px',
-                padding: '8px 12px',
-                borderRadius: '6px',
+                padding: '10px 14px',
+                borderRadius: '10px',
                 fontSize: '13px',
-                color: '#64748b',
+                color: '#707978',
                 backgroundColor: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
@@ -937,7 +966,7 @@ export function AiDraftAssistant({
           </div>
 
           {/* User Guidance Microcopy */}
-          <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>
+          <p style={{ margin: 0, fontSize: '11px', color: '#707978' }}>
             Tip: 1. Tap &quot;Copy Draft&quot; &bull; 2. Tap &quot;Open Google Reviews&quot; and paste your text into Google.
           </p>
         </div>
