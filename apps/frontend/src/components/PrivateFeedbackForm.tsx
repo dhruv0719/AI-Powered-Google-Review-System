@@ -9,6 +9,14 @@ export interface ServiceItem {
   name: string;
 }
 
+export const EMOJI_RATINGS = [
+  { value: 1, emoji: '😡', label: 'Very bad' },
+  { value: 2, emoji: '🙁', label: 'Bad' },
+  { value: 3, emoji: '😑', label: 'Okay' },
+  { value: 4, emoji: '😊', label: 'Good' },
+  { value: 5, emoji: '🤩', label: 'Excellent' },
+] as const;
+
 export interface PrivateFeedbackFormProps {
   code: string;
   locationName: string;
@@ -27,7 +35,6 @@ export function PrivateFeedbackForm({
   onSuccess,
 }: PrivateFeedbackFormProps) {
   const [rating, setRating] = useState<number | null>(null);
-  const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [availableServices, setAvailableServices] = useState<ServiceItem[]>(services);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [feedbackText, setFeedbackText] = useState('');
@@ -303,30 +310,64 @@ export function PrivateFeedbackForm({
       <div
         role="status"
         aria-live="polite"
-        style={{ textAlign: 'center', padding: '20px 8px' }}
+        style={{
+          textAlign: 'center',
+          padding: '24px 12px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+        }}
         data-testid="feedback-success"
       >
-        <div style={{ fontSize: '48px', color: '#16a34a', marginBottom: '12px' }} aria-hidden="true">
+        <div
+          style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            backgroundColor: '#E7F3F1',
+            border: '2px solid #D1E5E3',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '32px',
+            color: '#006764',
+            marginBottom: '16px',
+            boxShadow: '0 2px 8px rgba(0, 103, 100, 0.1)',
+          }}
+          aria-hidden="true"
+        >
           &#10004;
         </div>
-        <h3 style={{ margin: '0 0 8px 0', fontSize: '20px', color: '#111827', fontWeight: 600 }}>
+        <h3
+          style={{
+            margin: '0 0 8px 0',
+            fontFamily: "'Radio Canada Big', sans-serif",
+            fontSize: '22px',
+            color: '#181C1C',
+            fontWeight: 700,
+          }}
+        >
           Thank You for Your Feedback!
         </h3>
-        <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: '#4b5563', lineHeight: 1.5 }}>
+        <p style={{ margin: '0 0 24px 0', fontSize: '14px', color: '#3E4948', lineHeight: 1.5, maxWidth: '400px' }}>
           Your private feedback has been sent directly to the owner and management of{' '}
           <strong>{locationName}</strong>.
         </p>
         <div
           style={{
-            padding: '16px',
-            backgroundColor: '#eff6ff',
-            borderRadius: '8px',
+            width: '100%',
+            padding: '20px',
+            backgroundColor: '#F0F7F6',
+            borderRadius: '14px',
+            border: '1px solid #D1E5E3',
             fontSize: '14px',
-            color: '#1e40af',
+            color: '#181C1C',
+            boxSizing: 'border-box',
           }}
         >
-          Would you also like to share your experience publicly on Google?
-          <br />
+          <p style={{ margin: '0 0 10px 0', color: '#3E4948' }}>
+            Would you also like to share your experience publicly on Google?
+          </p>
           <a
             href={googleReviewUrl}
             target="_blank"
@@ -336,15 +377,21 @@ export function PrivateFeedbackForm({
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              marginTop: '10px',
+              gap: '6px',
               minHeight: '44px',
-              padding: '8px 16px',
+              padding: '10px 20px',
               fontWeight: 600,
-              color: brandColor || '#1d4ed8',
-              textDecoration: 'underline',
+              fontSize: '15px',
+              color: brandColor || '#006764',
+              backgroundColor: '#ffffff',
+              borderRadius: '10px',
+              border: `1.5px solid ${brandColor || '#006764'}`,
+              textDecoration: 'none',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
             }}
           >
-            Leave a Google Review &#8599;
+            <span>Leave a Google Review</span>
+            <span aria-hidden="true">&#8599;</span>
           </a>
         </div>
       </div>
@@ -355,92 +402,124 @@ export function PrivateFeedbackForm({
     <form
       onSubmit={handleSubmit}
       aria-busy={submitting}
-      style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}
+      style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}
       data-testid="private-feedback-form"
     >
       <div>
-        <h3 style={{ margin: '0 0 4px 0', fontSize: '18px', color: '#111827', fontWeight: 600 }}>
+        <h3
+          style={{
+            margin: '0 0 6px 0',
+            fontFamily: "'Radio Canada Big', sans-serif",
+            fontSize: '19px',
+            color: '#181C1C',
+            fontWeight: 700,
+          }}
+        >
           Send Private Feedback to Management
         </h3>
-        <p style={{ margin: 0, fontSize: '13px', color: '#4b5563', lineHeight: 1.4 }}>
+        <p style={{ margin: 0, fontSize: '13px', color: '#3E4948', lineHeight: 1.45 }}>
           Have compliments, suggestions, or concerns? Send a direct private note. Your feedback is sent directly to management and will not be posted to Google.
         </p>
       </div>
 
-      {/* Star Rating with Native Accessible Radio Inputs */}
+      {/* Emoji Experience Rating with Native Accessible Radio Inputs */}
       <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-        <legend style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+        <legend style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#181C1C', marginBottom: '10px' }}>
           How was your overall experience? <span style={{ color: '#dc2626' }} aria-hidden="true">*</span>
         </legend>
         <div
           style={{
             display: 'flex',
-            gap: '4px',
-            alignItems: 'center',
-            flexWrap: 'wrap',
+            justifyContent: 'space-between',
+            alignItems: 'stretch',
+            gap: 'clamp(4px, 1.5vw, 10px)',
+            width: '100%',
           }}
           role="radiogroup"
           aria-label="How was your overall experience?"
         >
-          {[1, 2, 3, 4, 5].map((star) => {
-            const isFilled = (hoverRating !== null ? hoverRating : rating || 0) >= star;
+          {EMOJI_RATINGS.map((item) => {
+            const isSelected = rating === item.value;
             return (
               <label
-                key={star}
-                htmlFor={`rating-star-${star}`}
-                data-testid={`star-label-${star}`}
-                className="star-radio-item touch-press"
-                onMouseEnter={() => setHoverRating(star)}
-                onMouseLeave={() => setHoverRating(null)}
+                key={item.value}
+                htmlFor={`rating-emoji-${item.value}`}
+                data-testid={`star-label-${item.value}`}
+                className="emoji-radio-item star-radio-item touch-press"
                 onClick={(e) => {
                   if (isFormLocked) return;
-                  // If the user taps the label or star glyph directly, and this star is already selected,
+                  // If the user taps the label or emoji glyph directly, and this rating is already selected,
                   // ensure session refresh is triggered (since native radio change won't fire)
-                  if ((e.target as HTMLElement).tagName !== 'INPUT' && rating === star) {
-                    handleRatingClick(star);
+                  if ((e.target as HTMLElement).tagName !== 'INPUT' && rating === item.value) {
+                    handleRatingClick(item.value);
                   }
                 }}
                 style={{
-                  display: 'inline-flex',
+                  flex: '1 1 0',
+                  minWidth: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  width: '48px',
-                  height: '48px', // WCAG 2.5.5 touch target >= 44x44px (48px thumb standard)
+                  padding: '10px 4px 8px 4px',
+                  minHeight: '48px', // WCAG 2.5.5 touch target >= 44x44px (48px standard)
                   cursor: isFormLocked ? 'not-allowed' : 'pointer',
                   opacity: isFormLocked ? 0.7 : 1,
                   userSelect: 'none',
-                  borderRadius: '8px',
+                  borderRadius: '14px',
+                  backgroundColor: isSelected ? '#E7F3F1' : '#F6FAF9',
+                  border: isSelected ? `2px solid ${brandColor || '#006764'}` : '1px solid #E2ECEB',
+                  boxShadow: isSelected ? '0 4px 12px rgba(0, 103, 100, 0.16)' : 'none',
+                  transform: isSelected ? 'scale(1.03)' : 'scale(1)',
+                  transition: 'all 0.15s ease',
+                  boxSizing: 'border-box',
                 }}
               >
                 <input
                   type="radio"
-                  id={`rating-star-${star}`}
+                  id={`rating-emoji-${item.value}`}
                   name="rating"
-                  value={star}
+                  value={item.value}
                   disabled={isFormLocked}
-                  checked={rating === star}
-                  onChange={() => !isFormLocked && handleRatingClick(star)}
+                  checked={isSelected}
+                  onChange={() => !isFormLocked && handleRatingClick(item.value)}
                   onClick={() => {
                     if (isFormLocked) return;
-                    // Re-clicking the already selected star must also refresh session if needed
-                    if (rating === star) {
-                      handleRatingClick(star);
+                    if (rating === item.value) {
+                      handleRatingClick(item.value);
                     }
                   }}
                   className="sr-only"
-                  data-testid={`star-${star}`}
-                  aria-label={`${star} star${star > 1 ? 's' : ''}`}
+                  data-testid={`star-${item.value}`}
+                  aria-label={`${item.value} - ${item.label}`}
                 />
                 <span
                   style={{
-                    fontSize: '32px',
-                    lineHeight: 1,
-                    color: isFilled ? '#eab308' : '#d1d5db',
-                    transition: 'color 0.15s ease',
+                    fontSize: 'clamp(32px, 8.5vw, 50px)',
+                    lineHeight: 1.1,
+                    display: 'block',
+                    transform: isSelected ? 'scale(1.06)' : 'scale(1)',
+                    transition: 'transform 0.15s ease',
                   }}
                   aria-hidden="true"
                 >
-                  &#9733;
+                  {item.emoji}
+                </span>
+                <span
+                  style={{
+                    fontSize: 'clamp(10px, 2.2vw, 12px)',
+                    fontWeight: isSelected ? 700 : 500,
+                    color: isSelected ? (brandColor || '#006764') : '#3E4948',
+                    marginTop: '4px',
+                    textAlign: 'center',
+                    lineHeight: 1.2,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: '100%',
+                  }}
+                >
+                  {item.label}
                 </span>
               </label>
             );
@@ -451,7 +530,7 @@ export function PrivateFeedbackForm({
       {/* Services Multi-Select Chips with >= 40px Touch Target */}
       {availableServices.length > 0 && (
         <div>
-          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '8px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#3E4948', marginBottom: '8px' }}>
             Which services did you experience? (Optional)
           </label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
@@ -470,19 +549,20 @@ export function PrivateFeedbackForm({
                     padding: '8px 16px',
                     borderRadius: '9999px',
                     fontSize: '14px',
-                    border: isSelected ? `2px solid ${brandColor}` : '1px solid #d1d5db',
-                    backgroundColor: isSelected ? '#eff6ff' : '#fff',
-                    color: isSelected ? brandColor : '#374151',
+                    border: isSelected ? `2px solid ${brandColor || '#006764'}` : '1px solid #BDC9C7',
+                    backgroundColor: isSelected ? '#E7F3F1' : '#ffffff',
+                    color: isSelected ? (brandColor || '#006764') : '#3E4948',
                     cursor: isFormLocked ? 'not-allowed' : 'pointer',
                     opacity: isFormLocked ? 0.7 : 1,
-                    fontWeight: isSelected ? 600 : 400,
+                    fontWeight: isSelected ? 600 : 500,
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     userSelect: 'none',
+                    transition: 'all 0.15s ease',
                   }}
                 >
-                  {isSelected && <span style={{ marginRight: '4px' }} aria-hidden="true">&#10003;</span>}
+                  {isSelected && <span style={{ marginRight: '6px', fontWeight: 700 }} aria-hidden="true">&#10003;</span>}
                   {s.name}
                 </button>
               );
@@ -493,7 +573,7 @@ export function PrivateFeedbackForm({
 
       {/* Written Feedback Textarea - 16px font prevents iOS Safari auto-zoom */}
       <div>
-        <label htmlFor="feedback-text" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+        <label htmlFor="feedback-text" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#3E4948', marginBottom: '6px' }}>
           Your Comments or Feedback (Optional)
         </label>
         <textarea
@@ -512,21 +592,22 @@ export function PrivateFeedbackForm({
           maxLength={1000}
           style={{
             width: '100%',
-            padding: '12px',
-            border: '1px solid #d1d5db',
-            borderRadius: '8px',
+            padding: '14px 16px',
+            border: '1px solid #BDC9C7',
+            borderRadius: '12px',
             fontSize: '16px', // Prevents iOS Safari viewport auto-zoom
-            lineHeight: 1.4,
+            lineHeight: 1.45,
             boxSizing: 'border-box',
             fontFamily: 'inherit',
-            backgroundColor: isFormLocked || isAiGenerating ? '#f3f4f6' : '#fff',
+            color: '#181C1C',
+            backgroundColor: isFormLocked || isAiGenerating ? '#F6FAF9' : '#ffffff',
             cursor: isFormLocked ? 'not-allowed' : isAiGenerating ? 'default' : 'text',
           }}
         />
         <div
           id="feedback-text-counter"
           aria-live="polite"
-          style={{ textAlign: 'right', fontSize: '12px', color: '#4b5563', marginTop: '4px' }}
+          style={{ textAlign: 'right', fontSize: '12px', color: '#707978', marginTop: '6px' }}
         >
           {feedbackText.length}/1000 characters
         </div>
@@ -551,7 +632,7 @@ export function PrivateFeedbackForm({
 
       {/* Customer Contact Input - 16px font and >= 44px height */}
       <div>
-        <label htmlFor="customer-contact" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>
+        <label htmlFor="customer-contact" style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#3E4948', marginBottom: '6px' }}>
           Email or Phone (Optional)
         </label>
         <input
@@ -569,12 +650,13 @@ export function PrivateFeedbackForm({
           style={{
             width: '100%',
             minHeight: '44px', // WCAG 2.5.5 minimum height
-            padding: '10px 12px',
-            border: '1px solid #d1d5db',
-            borderRadius: '8px',
+            padding: '10px 16px',
+            border: '1px solid #BDC9C7',
+            borderRadius: '12px',
             fontSize: '16px', // Prevents iOS Safari viewport auto-zoom
             boxSizing: 'border-box',
-            backgroundColor: isFormLocked ? '#f3f4f6' : '#fff',
+            color: '#181C1C',
+            backgroundColor: isFormLocked ? '#F6FAF9' : '#ffffff',
             cursor: isFormLocked ? 'not-allowed' : 'text',
           }}
         />
@@ -595,10 +677,10 @@ export function PrivateFeedbackForm({
           display: 'flex',
           alignItems: 'flex-start',
           gap: '12px',
-          padding: '14px',
-          backgroundColor: '#f9fafb',
-          borderRadius: '8px',
-          border: '1px solid #e5e7eb',
+          padding: '16px',
+          backgroundColor: '#F6FAF9',
+          borderRadius: '12px',
+          border: '1px solid #BDC9C7',
           cursor: isFormLocked ? 'not-allowed' : 'pointer',
           opacity: isFormLocked ? 0.7 : 1,
           userSelect: 'none',
@@ -620,11 +702,12 @@ export function PrivateFeedbackForm({
             height: '18px',
             cursor: isFormLocked ? 'not-allowed' : 'pointer',
             flexShrink: 0,
+            accentColor: brandColor || '#006764',
           }}
         />
         <label
           htmlFor="consentCheckbox"
-          style={{ fontSize: '13px', color: '#374151', lineHeight: 1.45, cursor: isFormLocked ? 'not-allowed' : 'pointer' }}
+          style={{ fontSize: '13px', color: '#3E4948', lineHeight: 1.45, cursor: isFormLocked ? 'not-allowed' : 'pointer' }}
         >
           <strong>I agree</strong> to submit this private feedback directly to the business owner and acknowledge that submitted information will be reviewed by management.
         </label>
@@ -634,7 +717,14 @@ export function PrivateFeedbackForm({
         <div
           role="alert"
           aria-live="assertive"
-          style={{ fontSize: '14px', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '10px 14px', borderRadius: '6px' }}
+          style={{
+            fontSize: '14px',
+            color: '#B91C1C',
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FECACA',
+            padding: '12px 16px',
+            borderRadius: '10px',
+          }}
         >
           {error}
         </div>
@@ -651,24 +741,26 @@ export function PrivateFeedbackForm({
         disabled={submitting || isAiGenerating || (!pendingSubmissionRef.current && (!rating || !consentGiven))}
         className="touch-press"
         style={{
-          minHeight: '48px', // Mobile touch target
-          padding: '14px 20px',
+          minHeight: '50px', // Mobile touch target
+          padding: '14px 24px',
           backgroundColor:
-            !rating || !consentGiven ? '#9ca3af' : brandColor,
+            !rating || !consentGiven ? '#BDC9C7' : (brandColor || '#006764'),
           color:
             !rating || !consentGiven ? '#ffffff' : submitButtonTextColor,
           border: 'none',
-          borderRadius: '8px',
+          borderRadius: '12px',
           fontSize: '16px',
           fontWeight: 600,
           cursor:
             submitting || isAiGenerating || (!pendingSubmissionRef.current && (!rating || !consentGiven))
               ? 'not-allowed'
               : 'pointer',
-          transition: 'background-color 0.2s',
+          transition: 'all 0.2s ease',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          boxShadow:
+            !rating || !consentGiven ? 'none' : '0 4px 12px rgba(0, 103, 100, 0.2)',
         }}
       >
         {submitting

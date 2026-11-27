@@ -20,12 +20,16 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
     vi.restoreAllMocks();
   });
 
-  it('1. should render stars, services, inputs, and consent checkbox initially', () => {
+  it('1. should render emoji ratings, services, inputs, and consent checkbox initially', () => {
     render(<PrivateFeedbackForm {...defaultProps} />);
 
     expect(screen.getByTestId('private-feedback-form')).toBeInTheDocument();
     expect(screen.getByTestId('star-1')).toBeInTheDocument();
     expect(screen.getByTestId('star-5')).toBeInTheDocument();
+    expect(screen.getByText('😡')).toBeInTheDocument();
+    expect(screen.getByText('🤩')).toBeInTheDocument();
+    expect(screen.getByText('Very bad')).toBeInTheDocument();
+    expect(screen.getByText('Excellent')).toBeInTheDocument();
     expect(screen.getByText('Ceramic Coating')).toBeInTheDocument();
     expect(screen.getByText('PPF Installation')).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/share details/i)).toBeInTheDocument();
@@ -325,23 +329,85 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
     ).toBeInTheDocument();
   });
 
-  it('11. should render accessible native radio stars inside fieldset with legend and 48x48px touch targets', () => {
+  it('11. should render accessible emoji rating buttons with labels, touch targets, and selection behavior', () => {
     render(<PrivateFeedbackForm {...defaultProps} />);
 
     // Fieldset and Legend
     expect(screen.getByRole('group', { name: /How was your overall experience/i })).toBeInTheDocument();
 
-    // 5 radio inputs
-    for (let star = 1; star <= 5; star++) {
-      const radio = screen.getByRole('radio', { name: `${star} star${star > 1 ? 's' : ''}` });
+    const emojiExpectations = [
+      { value: 1, emoji: '😡', label: 'Very bad' },
+      { value: 2, emoji: '🙁', label: 'Bad' },
+      { value: 3, emoji: '😑', label: 'Okay' },
+      { value: 4, emoji: '😊', label: 'Good' },
+      { value: 5, emoji: '🤩', label: 'Excellent' },
+    ];
+
+    // 1. All five emojis and their labels render & 2. No emoji is selected initially & 7. Accessibility
+    emojiExpectations.forEach((item) => {
+      expect(screen.getByText(item.emoji)).toBeInTheDocument();
+      expect(screen.getByText(item.label)).toBeInTheDocument();
+
+      const radio = screen.getByRole('radio', { name: `${item.value} - ${item.label}` });
       expect(radio).toBeInTheDocument();
       expect(radio).not.toBeChecked();
 
-      const label = screen.getByTestId(`star-label-${star}`);
-      expect(label.style.width).toBe('48px');
-      expect(label.style.height).toBe('48px');
+      const label = screen.getByTestId(`star-label-${item.value}`);
+      expect(label).toBeInTheDocument();
+      expect(label.style.minHeight).toBe('48px');
       expect(label.classList.contains('touch-press')).toBe(true);
       expect(label.classList.contains('star-radio-item')).toBe(true);
+      expect(label.classList.contains('emoji-radio-item')).toBe(true);
+    });
+
+    // 3. Selecting each emoji maps to the correct numeric rating
+    // 4. Selecting another emoji updates the selection
+    // 5. Only one rating can be selected at a time
+    emojiExpectations.forEach((item) => {
+      const radio = screen.getByRole('radio', { name: `${item.value} - ${item.label}` });
+      fireEvent.click(screen.getByTestId(`star-${item.value}`));
+
+      expect(radio).toBeChecked();
+
+      // Only one is selected
+      emojiExpectations.forEach((other) => {
+        if (other.value !== item.value) {
+          const otherRadio = screen.getByRole('radio', { name: `${other.value} - ${other.label}` });
+          expect(otherRadio).not.toBeChecked();
+        }
+      });
+    });
+  });
+
+  it('11b. selecting each emoji rating sends the exact corresponding numeric rating to the API', async () => {
+    const submitSpy = vi.spyOn(publicApi, 'submitPublicFeedback').mockResolvedValue({
+      success: true,
+      feedbackId: 'fb_test_123',
+      message: 'Feedback received',
+    });
+    vi.spyOn(publicApi, 'createPublicSession').mockResolvedValue({
+      expiresAt: new Date().toISOString(),
+    });
+
+    for (let ratingVal = 1; ratingVal <= 5; ratingVal++) {
+      submitSpy.mockClear();
+      const { unmount } = render(<PrivateFeedbackForm {...defaultProps} />);
+
+      // Select emoji rating
+      fireEvent.click(screen.getByTestId(`star-${ratingVal}`));
+      // Consent
+      fireEvent.click(screen.getByRole('checkbox', { name: /i agree/i }));
+      // Submit
+      fireEvent.click(screen.getByRole('button', { name: /submit private feedback/i }));
+
+      await waitFor(() => {
+        expect(submitSpy).toHaveBeenCalledWith(
+          defaultProps.code,
+          expect.objectContaining({ rating: ratingVal })
+        );
+      });
+
+      unmount();
     }
   });
 
@@ -593,7 +659,7 @@ describe('PrivateFeedbackForm (Extracted M5 Component)', () => {
     // Verify entered inputs are preserved intact
     expect(textarea).toHaveValue('Great ceramic coating work.');
     expect(contactInput).toHaveValue('customer@example.com');
-    expect(screen.getByRole('radio', { name: '5 stars' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /5 - Excellent/i })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /i agree/i })).toBeChecked();
 
     // Customer submits again
