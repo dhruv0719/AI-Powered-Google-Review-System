@@ -1,8 +1,10 @@
+import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { QRScanLanding } from './QRScanLanding.js';
-import { publicApi, PublicApiError } from '../../services/publicApi.js';
+import { publicApi, PublicApiError, ResolveCampaignOptions } from '../../services/publicApi.js';
+import { PublicQRResolutionDTO } from '@review-system/shared';
 
 describe('QRScanLanding cold-start and resilience tests', () => {
   const mockCampaign = {
@@ -133,5 +135,290 @@ describe('QRScanLanding cold-start and resilience tests', () => {
     expect(screen.queryByTestId('cold-start-progress')).not.toBeInTheDocument();
     expect(screen.getByText(/This review link is not found or has expired/i)).toBeInTheDocument();
     expect(screen.getByTestId('retry-button')).toBeInTheDocument();
+  });
+
+  it('5. initial load succeeds when rendered inside React.StrictMode', async () => {
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockImplementation(
+      (_code: string, options?: ResolveCampaignOptions) => {
+        return new Promise<PublicQRResolutionDTO>((resolve, reject) => {
+          if (options?.signal?.aborted) {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+            return;
+          }
+
+          const timer = setTimeout(() => {
+            resolve(mockCampaign);
+          }, 15);
+
+          options?.signal?.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            },
+            { once: true }
+          );
+        });
+      }
+    );
+
+    render(
+      <React.StrictMode>
+        <MemoryRouter initialEntries={['/qr/q_strictModeTest']}>
+          <Routes>
+            <Route path="/qr/:code" element={<QRScanLanding />} />
+          </Routes>
+        </MemoryRouter>
+      </React.StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('business-name')).toHaveTextContent('Apex Car Care');
+    });
+
+    expect(screen.queryByText(/Loading customer review page/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('google-review-cta')).toBeInTheDocument();
+  });
+
+  it('6. first StrictMode request is aborted and second request succeeds', async () => {
+    let callCount = 0;
+    let firstRequestAborted = false;
+    let secondRequestResolved = false;
+
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockImplementation(
+      (_code: string, options?: ResolveCampaignOptions) => {
+        callCount++;
+        const currentCall = callCount;
+
+        return new Promise<PublicQRResolutionDTO>((resolve, reject) => {
+          if (options?.signal?.aborted) {
+            if (currentCall === 1) firstRequestAborted = true;
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+            return;
+          }
+
+          const timer = setTimeout(() => {
+            if (currentCall === 2) secondRequestResolved = true;
+            resolve(mockCampaign);
+          }, 20);
+
+          options?.signal?.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              if (currentCall === 1) firstRequestAborted = true;
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            },
+            { once: true }
+          );
+        });
+      }
+    );
+
+    render(
+      <React.StrictMode>
+        <MemoryRouter initialEntries={['/qr/q_abortCycle']}>
+          <Routes>
+            <Route path="/qr/:code" element={<QRScanLanding />} />
+          </Routes>
+        </MemoryRouter>
+      </React.StrictMode>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('business-name')).toHaveTextContent('Apex Car Care');
+    });
+
+    expect(callCount).toBe(2);
+    expect(firstRequestAborted).toBe(true);
+    expect(secondRequestResolved).toBe(true);
+  });
+
+  it('7. a stale request cannot overwrite a newer request data', async () => {
+    const campaignA: PublicQRResolutionDTO = {
+      ...mockCampaign,
+      tenant: { displayName: 'Tenant A (Slow)', brandColor: '#111827' },
+    };
+    const campaignB: PublicQRResolutionDTO = {
+      ...mockCampaign,
+      tenant: { displayName: 'Tenant B (Fast)', brandColor: '#2563EB' },
+    };
+
+    let triggerResolveA: () => void;
+
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockImplementation((code: string) => {
+      if (code === 'q_codeA') {
+        return new Promise((resolve) => {
+          triggerResolveA = () => resolve(campaignA);
+        });
+      }
+      return Promise.resolve(campaignB);
+    });
+
+    function DynamicQRTest({ initialCode }: { initialCode: string }) {
+      const [currentCode, setCurrentCode] = React.useState(initialCode);
+      return (
+        <div>
+          <button data-testid="switch-code-btn" onClick={() => setCurrentCode('q_codeB')}>
+            Switch
+          </button>
+          <QRScanLanding code={currentCode} />
+        </div>
+      );
+    }
+
+    render(
+      <MemoryRouter>
+        <DynamicQRTest initialCode="q_codeA" />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText(/Loading customer review page/i)).toBeInTheDocument();
+
+    // Switch to q_codeB while q_codeA is still pending
+    fireEvent.click(screen.getByTestId('switch-code-btn'));
+
+    // Fast request B resolves first
+    await waitFor(() => {
+      expect(screen.getByTestId('business-name')).toHaveTextContent('Tenant B (Fast)');
+    });
+
+    // Stale request A resolves afterwards
+    triggerResolveA!();
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByTestId('business-name')).toHaveTextContent('Tenant B (Fast)');
+    expect(screen.queryByText('Tenant A (Slow)')).not.toBeInTheDocument();
+  });
+
+  it('8. changing the QR code while a request is pending does not leave the page loading', async () => {
+    let callCount = 0;
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockImplementation(
+      (_code: string, options?: ResolveCampaignOptions) => {
+        callCount++;
+        return new Promise<PublicQRResolutionDTO>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            resolve({
+              ...mockCampaign,
+              tenant: { displayName: `Campaign ${_code}`, brandColor: '#2563EB' },
+            });
+          }, 30);
+
+          options?.signal?.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            },
+            { once: true }
+          );
+        });
+      }
+    );
+
+    function RouteSwitcher() {
+      const navigate = useNavigate();
+      return (
+        <div>
+          <button data-testid="nav-code-2" onClick={() => navigate('/qr/q_secondCode')}>
+            Nav to 2
+          </button>
+          <Routes>
+            <Route path="/qr/:code" element={<QRScanLanding />} />
+          </Routes>
+        </div>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/qr/q_firstCode']}>
+        <RouteSwitcher />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText(/Loading customer review page/i)).toBeInTheDocument();
+
+    // Navigate to q_secondCode while request 1 is pending
+    fireEvent.click(screen.getByTestId('nav-code-2'));
+
+    // New request resolves and loading finishes
+    await waitFor(() => {
+      expect(screen.getByTestId('business-name')).toHaveTextContent('Campaign q_secondCode');
+    });
+
+    expect(screen.queryByText(/Loading customer review page/i)).not.toBeInTheDocument();
+    expect(callCount).toBe(2);
+  });
+
+  it('9. manual retry works after a failed request', async () => {
+    let callCount = 0;
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        throw new PublicApiError('Service temporarily unavailable', 503, 'SERVICE_UNAVAILABLE');
+      }
+      return mockCampaign;
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/qr/q_retryFailTest']}>
+        <Routes>
+          <Route path="/qr/:code" element={<QRScanLanding />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/This review service is currently unavailable/i)).toBeInTheDocument();
+    expect(screen.getByTestId('retry-button')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('retry-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('business-name')).toHaveTextContent('Apex Car Care');
+    });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(callCount).toBe(2);
+  });
+
+  it('10. loading state eventually ends after success or genuine failure', async () => {
+    // 10a: Failure terminates loading
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockRejectedValueOnce(
+      new PublicApiError('Internal server error', 500)
+    );
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/qr/q_failureEndsLoading']}>
+        <Routes>
+          <Route path="/qr/:code" element={<QRScanLanding />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Loading customer review page/i)).not.toBeInTheDocument();
+
+    unmount();
+
+    // 10b: Success terminates loading
+    vi.spyOn(publicApi, 'resolvePublicCampaign').mockResolvedValueOnce(mockCampaign);
+
+    render(
+      <MemoryRouter initialEntries={['/qr/q_successEndsLoading']}>
+        <Routes>
+          <Route path="/qr/:code" element={<QRScanLanding />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('business-name')).toHaveTextContent('Apex Car Care');
+    });
+    expect(screen.queryByText(/Loading customer review page/i)).not.toBeInTheDocument();
   });
 });
