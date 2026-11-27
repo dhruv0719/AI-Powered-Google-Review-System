@@ -100,7 +100,6 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
 
   // Guards against race conditions and overlapping requests
   const requestIdRef = useRef(0);
-  const inFlightRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const loadCampaign = useCallback(async () => {
@@ -116,12 +115,6 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
     }
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-
-    // Prevent overlapping resolution requests
-    if (inFlightRef.current) {
-      return;
-    }
-    inFlightRef.current = true;
 
     const currentRequestId = ++requestIdRef.current;
     setLoading(true);
@@ -165,7 +158,6 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
       setData(null);
       setError(mapCustomerErrorMessage(err));
     } finally {
-      inFlightRef.current = false;
       if (currentRequestId === requestIdRef.current) {
         setLoading(false);
       }
@@ -225,10 +217,7 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
               type="button"
               data-testid="cold-start-retry-now"
               className="touch-press"
-              onClick={() => {
-                inFlightRef.current = false;
-                loadCampaign();
-              }}
+              onClick={loadCampaign}
               style={{
                 minHeight: '44px',
                 minWidth: '120px',
@@ -291,10 +280,7 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
           type="button"
           data-testid="retry-button"
           className="touch-press"
-          onClick={() => {
-            inFlightRef.current = false;
-            loadCampaign();
-          }}
+          onClick={loadCampaign}
           disabled={loading}
           style={{
             marginTop: '20px',
