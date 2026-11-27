@@ -146,7 +146,7 @@ describe('AiDraftAssistant Component', () => {
     });
 
     expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
-    expect(screen.getByTestId('ai-draft-text')).toHaveTextContent(mockResponse.draft);
+    expect(screen.getByTestId('ai-draft-text')).toHaveValue(mockResponse.draft);
   });
 
   // =========================================================================
@@ -262,223 +262,91 @@ describe('AiDraftAssistant Component', () => {
   });
 
   // =========================================================================
-  // 5. Apply and Pre-Apply Snapshot Revert Rule
+  // 5. Compulsory Service Selection Validation
   // =========================================================================
-  it('7. should capture exact pre-Apply snapshot and restore it on Revert', async () => {
-    const draftText = 'AI polished draft version.';
+  it('7. should validate that at least one service is selected before polishing', async () => {
+    const apiSpy = vi.spyOn(publicApi, 'generateAiDraft');
+
+    render(<AiDraftAssistant {...defaultProps} serviceIds={[]} />);
+
+    const button = screen.getByRole('button', { name: /polish with ai/i });
+    fireEvent.click(button);
+
+    expect(screen.getByTestId('ai-service-validation-error')).toHaveTextContent(
+      'Please select at least one service before polishing with AI.'
+    );
+    expect(apiSpy).not.toHaveBeenCalled();
+  });
+
+  it('8. should clear service validation error when serviceIds are provided', async () => {
+    vi.spyOn(publicApi, 'generateAiDraft');
+
+    const { rerender } = render(<AiDraftAssistant {...defaultProps} serviceIds={[]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    expect(screen.getByTestId('ai-service-validation-error')).toBeInTheDocument();
+
+    rerender(<AiDraftAssistant {...defaultProps} serviceIds={['srv_1']} />);
+    expect(screen.queryByTestId('ai-service-validation-error')).not.toBeInTheDocument();
+  });
+
+  // =========================================================================
+  // 6. Action 1: Regenerate
+  // =========================================================================
+  it('9. should trigger Regenerate to request a new draft without erasing customer input', async () => {
+    let callCount = 0;
+    vi.spyOn(publicApi, 'generateAiDraft').mockImplementation(async () => {
+      callCount++;
+      return {
+        status: 'generated',
+        draft: callCount === 1 ? 'First draft generated.' : 'Second regenerated draft.',
+        generationsRemaining: callCount === 1 ? 2 : 1,
+        isReplay: false,
+      };
+    });
+
+    render(<AiDraftAssistant {...defaultProps} />);
+
+    // 1st generation
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('ai-draft-text')).toHaveValue('First draft generated.');
+    expect(screen.getByTestId('ai-quota-indicator')).toHaveTextContent('2 drafts remaining');
+
+    // Click Regenerate
+    const regenerateBtn = screen.getByTestId('ai-regenerate-button');
+    expect(regenerateBtn).toBeInTheDocument();
+    fireEvent.click(regenerateBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-draft-text')).toHaveValue('Second regenerated draft.');
+    });
+    expect(screen.getByTestId('ai-quota-indicator')).toHaveTextContent('1 draft remaining');
+    expect(callCount).toBe(2);
+  });
+
+  it('10. should disable Regenerate button when quota is exhausted', async () => {
     vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
       status: 'generated',
-      draft: draftText,
-      generationsRemaining: 2,
+      draft: 'Last possible draft.',
+      generationsRemaining: 0,
       isReplay: false,
     });
 
-    const onApplyDraft = vi.fn();
-    const onRevertDraft = vi.fn();
+    render(<AiDraftAssistant {...defaultProps} />);
 
-    const currentFeedback = 'My custom drafted note about the service.';
-    const { rerender } = render(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText={currentFeedback}
-        onApplyDraft={onApplyDraft}
-        onRevertDraft={onRevertDraft}
-        hasAppliedDraft={false}
-      />
-    );
-
-    // Generate draft
     fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
     await waitFor(() => {
       expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
     });
 
-    // Click Apply
-    fireEvent.click(screen.getByTestId('ai-apply-button'));
-    expect(onApplyDraft).toHaveBeenCalledWith(draftText);
-
-    // Simulate parent updating hasAppliedDraft and feedbackText
-    rerender(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText={draftText}
-        onApplyDraft={onApplyDraft}
-        onRevertDraft={onRevertDraft}
-        hasAppliedDraft={true}
-      />
+    const regenerateBtn = screen.getByTestId('ai-regenerate-button');
+    expect(regenerateBtn).toBeDisabled();
+    expect(screen.getByTestId('ai-quota-indicator')).toHaveTextContent(
+      'Draft limit reached (3/3 used)'
     );
-
-    // Revert button should now be rendered
-    const revertBtn = screen.getByTestId('ai-revert-button');
-    expect(revertBtn).toBeInTheDocument();
-
-    // Click Revert
-    fireEvent.click(revertBtn);
-    // MUST restore the exact pre-Apply snapshot!
-    expect(onRevertDraft).toHaveBeenCalledWith(currentFeedback);
-  });
-
-  it('8. should correctly handle multiple Apply and Revert cycles with updated pre-Apply snapshots', async () => {
-    const draftText = 'AI polished draft version.';
-    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
-      status: 'generated',
-      draft: draftText,
-      generationsRemaining: 2,
-      isReplay: false,
-    });
-
-    const onApplyDraft = vi.fn();
-    const onRevertDraft = vi.fn();
-
-    const initialText = 'First version of customer feedback.';
-    const { rerender } = render(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText={initialText}
-        onApplyDraft={onApplyDraft}
-        onRevertDraft={onRevertDraft}
-        hasAppliedDraft={false}
-      />
-    );
-
-    // 1. Generate & Apply Cycle 1
-    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
-    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByTestId('ai-apply-button'));
-    expect(onApplyDraft).toHaveBeenCalledWith(draftText);
-
-    // Revert Cycle 1
-    rerender(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText={draftText}
-        onApplyDraft={onApplyDraft}
-        onRevertDraft={onRevertDraft}
-        hasAppliedDraft={true}
-      />
-    );
-    fireEvent.click(screen.getByTestId('ai-revert-button'));
-    expect(onRevertDraft).toHaveBeenCalledWith(initialText);
-
-    // 2. Customer modifies text to Version 2 before Apply Cycle 2
-    const versionTwoText = 'Second modified version of customer feedback.';
-    rerender(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText={versionTwoText}
-        onApplyDraft={onApplyDraft}
-        onRevertDraft={onRevertDraft}
-        hasAppliedDraft={false}
-      />
-    );
-
-    // Apply Cycle 2
-    fireEvent.click(screen.getByTestId('ai-apply-button'));
-    expect(onApplyDraft).toHaveBeenCalledWith(draftText);
-
-    // Revert Cycle 2 MUST restore Version 2, NOT initialText!
-    rerender(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText={draftText}
-        onApplyDraft={onApplyDraft}
-        onRevertDraft={onRevertDraft}
-        hasAppliedDraft={true}
-      />
-    );
-    fireEvent.click(screen.getByTestId('ai-revert-button'));
-    expect(onRevertDraft).toHaveBeenCalledWith(versionTwoText);
-  });
-
-  // =========================================================================
-  // 6. Stale Detection Rules
-  // =========================================================================
-  it('9. should not show stale badge immediately after applying draft', async () => {
-    const draftText = 'AI polished draft version.';
-    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
-      status: 'generated',
-      draft: draftText,
-      generationsRemaining: 2,
-      isReplay: false,
-    });
-
-    const { rerender } = render(
-      <AiDraftAssistant {...defaultProps} feedbackText="Original text" hasAppliedDraft={false} />
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
-    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByTestId('ai-apply-button'));
-
-    // Parent updates feedbackText to draftText and hasAppliedDraft to true
-    rerender(
-      <AiDraftAssistant {...defaultProps} feedbackText={draftText} hasAppliedDraft={true} />
-    );
-
-    // Stale badge MUST NOT be present
-    expect(screen.queryByTestId('ai-stale-badge')).not.toBeInTheDocument();
-    expect(screen.getByTestId('ai-applied-badge')).toBeInTheDocument();
-  });
-
-  it('10. should mark draft stale when text, rating, or services change', async () => {
-    const draftText = 'AI polished draft version.';
-    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
-      status: 'generated',
-      draft: draftText,
-      generationsRemaining: 2,
-      isReplay: false,
-    });
-
-    const { rerender } = render(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText="Initial feedback"
-        rating={5}
-        serviceIds={['srv_1']}
-        hasAppliedDraft={false}
-      />
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
-    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
-
-    // 1. Text change -> Stale
-    rerender(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText="Modified feedback text"
-        rating={5}
-        serviceIds={['srv_1']}
-        hasAppliedDraft={false}
-      />
-    );
-    expect(screen.getByTestId('ai-stale-badge')).toBeInTheDocument();
-
-    // Restore text, change rating -> Stale
-    rerender(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText="Initial feedback"
-        rating={4}
-        serviceIds={['srv_1']}
-        hasAppliedDraft={false}
-      />
-    );
-    expect(screen.getByTestId('ai-stale-badge')).toBeInTheDocument();
-
-    // Restore rating, change services -> Stale
-    rerender(
-      <AiDraftAssistant
-        {...defaultProps}
-        feedbackText="Initial feedback"
-        rating={5}
-        serviceIds={['srv_1', 'srv_2']}
-        hasAppliedDraft={false}
-      />
-    );
-    expect(screen.getByTestId('ai-stale-badge')).toBeInTheDocument();
   });
 
   // =========================================================================
@@ -710,10 +578,10 @@ describe('AiDraftAssistant Component', () => {
   });
 
   // =========================================================================
-  // 8. Clipboard Copy and Independent Google Review Action
+  // 8. Action 2: Post on Google (Tab Reservation, Clipboard & Navigation)
   // =========================================================================
-  it('15. should copy draft text to clipboard and display confirmation toast', async () => {
-    const draftText = 'Polished draft text to be copied.';
+  it('15. should copy draft text and navigate reserved tab to the validated business Google Review URL', async () => {
+    const draftText = 'Polished draft text ready for Google.';
     vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
       status: 'generated',
       draft: draftText,
@@ -728,37 +596,83 @@ describe('AiDraftAssistant Component', () => {
       },
     });
 
-    render(<AiDraftAssistant {...defaultProps} />);
-
-    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
-    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
-
-    const copyBtn = screen.getByTestId('ai-copy-button');
-    fireEvent.click(copyBtn);
-
-    expect(writeTextSpy).toHaveBeenCalledWith(draftText);
-    await waitFor(() => {
-      expect(screen.getByTestId('ai-copy-button')).toHaveTextContent('Copied to Clipboard!');
-    });
-  });
-
-  it('16. should provide independent Google Review link with safe external attributes', async () => {
-    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
-      status: 'generated',
-      draft: 'Draft text',
-      generationsRemaining: 2,
-      isReplay: false,
-    });
+    const mockTab = {
+      location: { href: '' },
+      close: vi.fn(),
+      closed: false,
+    };
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(mockTab as any);
 
     render(<AiDraftAssistant {...defaultProps} googleReviewUrl="https://g.page/r/test/review" />);
 
     fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
     await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
 
-    const googleLink = screen.getByTestId('ai-open-google-button');
-    expect(googleLink).toHaveAttribute('href', 'https://g.page/r/test/review');
-    expect(googleLink).toHaveAttribute('target', '_blank');
-    expect(googleLink).toHaveAttribute('rel', 'noopener noreferrer');
+    const postBtn = screen.getByTestId('post-to-google-button');
+    expect(postBtn).toBeInTheDocument();
+    fireEvent.click(postBtn);
+
+    await waitFor(() => {
+      expect(writeTextSpy).toHaveBeenCalledWith(draftText);
+    });
+
+    // Synchronously reserved tab was opened
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
+    // Tab was navigated to validated business Google Review URL
+    expect(mockTab.location.href).toBe('https://g.page/r/test/review');
+    expect(mockTab.close).not.toHaveBeenCalled();
+
+    // Confirmation toast displayed
+    expect(screen.getByTestId('ai-post-copied-toast')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-post-copied-toast')).toHaveTextContent(
+      'Draft copied! Google Reviews opened in a new tab.'
+    );
+  });
+
+  it('16. should close reserved blank tab and NOT navigate when clipboard copy fails', async () => {
+    const draftText = 'Polished draft text.';
+    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+      status: 'generated',
+      draft: draftText,
+      generationsRemaining: 2,
+      isReplay: false,
+    });
+
+    const writeTextSpy = vi.fn().mockRejectedValue(new Error('Permission denied'));
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: writeTextSpy,
+      },
+    });
+    // DOM fallback copy also fails
+    document.execCommand = vi.fn().mockReturnValue(false);
+
+    const mockTab = {
+      location: { href: '' },
+      close: vi.fn(),
+      closed: false,
+    };
+    vi.spyOn(window, 'open').mockReturnValue(mockTab as any);
+
+    render(<AiDraftAssistant {...defaultProps} googleReviewUrl="https://g.page/r/test/review" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
+
+    const postBtn = screen.getByTestId('post-to-google-button');
+    fireEvent.click(postBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-copy-failed-alert')).toBeInTheDocument();
+    });
+
+    // Reserved tab was closed upon clipboard failure!
+    expect(mockTab.close).toHaveBeenCalledTimes(1);
+    // Location was NOT navigated to Google!
+    expect(mockTab.location.href).toBe('');
+    expect(screen.getByTestId('ai-copy-failed-alert')).toHaveTextContent(
+      'Draft could not be automatically copied to clipboard'
+    );
   });
 
   // =========================================================================
@@ -780,41 +694,127 @@ describe('AiDraftAssistant Component', () => {
   });
 
   // =========================================================================
-  // 10. Inline Edit Mode and Discard
+  // 10. Direct Editing, Popup Blocker Fallback, URL Security, and Action Buttons
   // =========================================================================
-  it('18. should allow customer to edit draft inline and apply edited text', async () => {
+  it('18. should support direct editing of generated draft text and Post on Google copies latest edited text', async () => {
+    const originalDraft = 'Original AI draft text.';
     vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
       status: 'generated',
-      draft: 'Original AI draft.',
+      draft: originalDraft,
       generationsRemaining: 2,
       isReplay: false,
     });
 
-    const onApplyDraft = vi.fn();
-    render(<AiDraftAssistant {...defaultProps} onApplyDraft={onApplyDraft} />);
+    const writeTextSpy = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: writeTextSpy,
+      },
+    });
+    const mockTab = { location: { href: '' }, close: vi.fn(), closed: false };
+    vi.spyOn(window, 'open').mockReturnValue(mockTab as any);
+
+    render(<AiDraftAssistant {...defaultProps} />);
 
     fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
     await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
 
-    // Enter edit mode
-    fireEvent.click(screen.getByTestId('ai-edit-toggle-button'));
+    // Verify draft appears directly in editable textarea
+    const draftTextarea = screen.getByTestId('ai-draft-text');
+    expect(draftTextarea).toHaveValue(originalDraft);
 
-    const editTextarea = screen.getByTestId('ai-draft-edit-textarea');
-    expect(editTextarea).toHaveValue('Original AI draft.');
-
-    fireEvent.change(editTextarea, {
-      target: { value: 'Original AI draft with my personal tweak.' },
+    // Customer directly edits draft in the preview card
+    fireEvent.change(draftTextarea, {
+      target: { value: 'Customer customized and polished review!' },
     });
+    expect(draftTextarea).toHaveValue('Customer customized and polished review!');
 
-    // Apply edited text
-    fireEvent.click(screen.getByTestId('ai-apply-button'));
-    expect(onApplyDraft).toHaveBeenCalledWith('Original AI draft with my personal tweak.');
+    // Click Post on Google
+    fireEvent.click(screen.getByTestId('post-to-google-button'));
+
+    await waitFor(() => {
+      expect(writeTextSpy).toHaveBeenCalledWith('Customer customized and polished review!');
+    });
   });
 
-  it('19. should clear draft preview card when Discard is clicked', async () => {
+  it('18b. should expose a direct Google link through existing action control when browser blocks initial tab (popup-blocker fallback)', async () => {
+    const draftText = 'Review draft ready for fallback test.';
     vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
       status: 'generated',
-      draft: 'Draft to discard.',
+      draft: draftText,
+      generationsRemaining: 2,
+      isReplay: false,
+    });
+
+    const writeTextSpy = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: writeTextSpy,
+      },
+    });
+    // Simulate browser popup blocker returning null on window.open
+    vi.spyOn(window, 'open').mockReturnValue(null);
+
+    render(<AiDraftAssistant {...defaultProps} googleReviewUrl="https://g.page/r/test/review" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
+
+    const postBtn = screen.getByTestId('post-to-google-button');
+    expect(postBtn.tagName).toBe('BUTTON');
+
+    fireEvent.click(postBtn);
+
+    await waitFor(() => {
+      expect(writeTextSpy).toHaveBeenCalledWith(draftText);
+    });
+
+    // Control transitions to direct link without adding a third button
+    const directLink = screen.getByTestId('post-to-google-button');
+    expect(directLink.tagName).toBe('A');
+    expect(directLink).toHaveAttribute('href', 'https://g.page/r/test/review');
+    expect(directLink).toHaveAttribute('target', '_blank');
+    expect(directLink).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(directLink).toHaveTextContent(/Continue to Google Reviews/i);
+
+    // Toast indicates copied and prompts tap on direct link
+    expect(screen.getByTestId('ai-post-copied-toast')).toHaveTextContent(
+      'Draft copied to clipboard! Tap Continue to Google Reviews below to publish.'
+    );
+  });
+
+  it('18c. should reject unsafe review URLs without opening or navigating to them', async () => {
+    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+      status: 'generated',
+      draft: 'Draft with malicious url test.',
+      generationsRemaining: 2,
+      isReplay: false,
+    });
+
+    const openSpy = vi.spyOn(window, 'open');
+
+    // Unsafe javascript: URI
+    render(<AiDraftAssistant {...defaultProps} googleReviewUrl="javascript:alert(1)" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('post-to-google-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-error-notice')).toHaveTextContent(
+        'A valid Google Review URL is not configured for this location.'
+      );
+    });
+
+    // Did NOT attempt to navigate to javascript: URI
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('18d. should contain exactly two final action buttons and NO separate Copy, Open, Apply, Revert, Discard or Edit Text buttons', async () => {
+    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+      status: 'generated',
+      draft: 'Clean two-button draft.',
       generationsRemaining: 2,
       isReplay: false,
     });
@@ -824,9 +824,44 @@ describe('AiDraftAssistant Component', () => {
     fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
     await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByTestId('ai-discard-button'));
+    const draftCard = screen.getByTestId('ai-draft-card');
+    const buttons = draftCard.querySelectorAll('button');
 
-    expect(screen.queryByTestId('ai-draft-card')).not.toBeInTheDocument();
+    // Exactly two buttons: Regenerate and Post on Google
+    expect(buttons).toHaveLength(2);
+    expect(screen.getByTestId('ai-regenerate-button')).toBeInTheDocument();
+    expect(screen.getByTestId('post-to-google-button')).toBeInTheDocument();
+
+    // Verify all legacy/removed buttons are strictly absent
+    expect(screen.queryByTestId('ai-edit-toggle-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('ai-copy-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('ai-open-google-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('ai-apply-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('ai-revert-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('ai-discard-button')).not.toBeInTheDocument();
+  });
+
+  it('19. should notify onDraftChange when draft is generated and edited', async () => {
+    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+      status: 'generated',
+      draft: 'Generated draft result.',
+      generationsRemaining: 2,
+      isReplay: false,
+    });
+
+    const onDraftChange = vi.fn();
+    render(<AiDraftAssistant {...defaultProps} onDraftChange={onDraftChange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
+
+    expect(onDraftChange).toHaveBeenCalledWith('Generated draft result.');
+
+    // Direct edit triggers onDraftChange
+    fireEvent.change(screen.getByTestId('ai-draft-text'), {
+      target: { value: 'Generated draft result with customer tweak.' },
+    });
+    expect(onDraftChange).toHaveBeenCalledWith('Generated draft result with customer tweak.');
   });
 
   // =========================================================================

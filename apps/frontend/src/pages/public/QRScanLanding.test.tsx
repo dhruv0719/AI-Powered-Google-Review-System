@@ -41,7 +41,8 @@ describe('QRScanLanding cold-start and resilience tests', () => {
     expect(googleCta).toBeInTheDocument();
     expect(googleCta).toHaveAttribute('href', 'https://g.page/r/apexcar/review');
     expect(googleCta).toHaveTextContent(/Write a Review on Google/i);
-    expect(screen.getByTestId('private-feedback-card')).toBeInTheDocument();
+    expect(screen.getByTestId('customer-review-flow')).toBeInTheDocument();
+    expect(screen.queryByTestId('private-feedback-card')).not.toBeInTheDocument();
   });
 
   it('2. should display waking up status when cold-start progress is reported', async () => {
