@@ -7,8 +7,7 @@ import {
   ErrorCodes,
 } from '@review-system/shared';
 import { publicApi, PublicApiError } from '../../services/publicApi.js';
-import { getContrastingTextColor } from '../../utils/contrast.js';
-import { PrivateFeedbackForm } from '../../components/PrivateFeedbackForm.js';
+import { CustomerReviewFlow } from '../../components/CustomerReviewFlow.js';
 
 export interface QRScanLandingProps {
   code?: string;
@@ -378,8 +377,6 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
 
   // Sanitize brandColor on frontend before applying to dynamic CSS
   const brandColor = sanitizeBrandColor(data.tenant.brandColor);
-  // Ensure WCAG AA contrast (>= 4.5:1) for CTA button text across all merchant brand colors
-  const ctaTextColor = getContrastingTextColor(brandColor);
   const locationAddress = [data.location.address, data.location.city].filter(Boolean).join(', ');
 
   return (
@@ -474,152 +471,14 @@ export function QRScanLanding({ code: propCode }: QRScanLandingProps) {
         )}
       </header>
 
-      {/* UNCONDITIONAL Google Review Action (ZERO review gating) */}
-      <section
-        aria-label="Google Review Action"
-        style={{
-          backgroundColor: '#F0F7F6',
-          borderRadius: '16px',
-          padding: '22px 18px',
-          textAlign: 'center',
-          border: '1px solid #D1E5E3',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-        }}
-      >
-        {/* 5 Prominent Gold Stars */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '4px',
-            fontSize: '24px',
-            color: '#F59E0B',
-            marginBottom: '8px',
-            lineHeight: 1,
-          }}
-          aria-hidden="true"
-        >
-          <span>&#9733;</span>
-          <span>&#9733;</span>
-          <span>&#9733;</span>
-          <span>&#9733;</span>
-          <span>&#9733;</span>
-        </div>
-
-        <h2
-          style={{
-            margin: '0 0 6px 0',
-            fontFamily: "'Radio Canada Big', sans-serif",
-            fontSize: '19px',
-            color: '#181C1C',
-            fontWeight: 700,
-            lineHeight: 1.3,
-          }}
-        >
-          Support Us on Google
-        </h2>
-
-        <p
-          style={{
-            margin: '0 0 18px 0',
-            fontSize: '14px',
-            color: '#3E4948',
-            lineHeight: 1.45,
-            maxWidth: '380px',
-          }}
-        >
-          Public Google reviews directly support our staff and help other customers find us!
-        </p>
-
-        <a
-          data-testid="google-review-cta"
-          className="touch-press"
-          href={data.location.googleReviewUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            width: '100%',
-            minHeight: '48px',
-            padding: '14px 20px',
-            backgroundColor: brandColor || '#006764',
-            color: ctaTextColor,
-            borderRadius: '12px',
-            textDecoration: 'none',
-            fontSize: '16px',
-            fontWeight: 600,
-            boxShadow: '0 4px 12px rgba(0, 103, 100, 0.18)',
-            userSelect: 'none',
-            boxSizing: 'border-box',
-          }}
-        >
-          <span>Write a Review on Google</span>
-          <span aria-hidden="true">&#8599;</span>
-        </a>
-      </section>
-
-      {/* Elegant Section Divider */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-          margin: '4px 0',
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            height: '1px',
-            backgroundColor: '#E2ECEB',
-          }}
-        />
-        <div
-          style={{
-            position: 'relative',
-            backgroundColor: '#ffffff',
-            padding: '4px 14px',
-            borderRadius: '9999px',
-            border: '1px solid #E2ECEB',
-            fontSize: '12px',
-            fontWeight: 600,
-            color: '#3E4948',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
-          <span aria-hidden="true">&#128274;</span>
-          <span>Private Feedback</span>
-        </div>
-      </div>
-
-      {/* 3. Direct Private Customer Feedback Section */}
-      <section
-        aria-label="Private Feedback to Management"
-        data-testid="private-feedback-card"
-        style={{
-          width: '100%',
-          boxSizing: 'border-box',
-        }}
-      >
-        <PrivateFeedbackForm
-          code={code}
-          locationName={data.location.name}
-          googleReviewUrl={data.location.googleReviewUrl}
-          services={data.services}
-          brandColor={brandColor}
-        />
-      </section>
+      {/* Unified Customer Review Flow */}
+      <CustomerReviewFlow
+        code={code}
+        tenant={data.tenant}
+        location={data.location}
+        services={data.services}
+        brandColor={brandColor}
+      />
     </div>
   );
 }
