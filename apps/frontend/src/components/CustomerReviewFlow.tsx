@@ -350,10 +350,10 @@ export function CustomerReviewFlow({
             marginBottom: '4px',
           }}
         >
-          Tell us more about your experience
+          Tell us about your experience (optional)
         </label>
         <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#707978' }}>
-          Share a few words about what you liked or experienced.
+          Share a few words about your experience, or let AI write your review using your rating and selected services.
         </p>
 
         <textarea
@@ -364,7 +364,7 @@ export function CustomerReviewFlow({
             ensureSession();
             setFeedbackText(e.target.value);
           }}
-          placeholder="Share details about what went well or what you experienced..."
+          placeholder="Tell us about your experience (optional)..."
           rows={3}
           maxLength={1000}
           style={{

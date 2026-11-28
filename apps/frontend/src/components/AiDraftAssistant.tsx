@@ -79,6 +79,7 @@ export function AiDraftAssistant({
   const [authoritativeQuota, setAuthoritativeQuota] = useState<number | null>(null);
   const [activeDraft, setActiveDraft] = useState<ActiveDraftState | null>(null);
   const [insufficientContextNotice, setInsufficientContextNotice] = useState<string | null>(null);
+  const [ratingValidationError, setRatingValidationError] = useState<string | null>(null);
   const [serviceValidationError, setServiceValidationError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isRetryable, setIsRetryable] = useState(false);
@@ -101,6 +102,20 @@ export function AiDraftAssistant({
       setServiceValidationError(null);
     }
   }, [serviceIds]);
+
+  // Clear rating validation error when rating is selected
+  useEffect(() => {
+    if (typeof rating === 'number' && rating >= 1 && rating <= 5) {
+      setRatingValidationError(null);
+    }
+  }, [rating]);
+
+  // Reset postState to idle when inputs change
+  useEffect(() => {
+    if (activeDraft) {
+      setPostState({ status: 'idle' });
+    }
+  }, [rating, serviceIds, feedbackText]);
 
   // Preserves exact { clientDraftId, payload } for deterministic manual retries
   const pendingRequestRef = useRef<{
@@ -138,28 +153,34 @@ export function AiDraftAssistant({
   }, []);
 
   const isBrowserSupported = isGraphemeSupported();
-  // Grapheme length check for frontend activation
-  const graphemeCount = isBrowserSupported ? countGraphemes(feedbackText) : null;
-  const hasMinimumText =
-    isBrowserSupported && graphemeCount !== null && graphemeCount >= 10;
   const isQuotaExhausted = authoritativeQuota === 0;
+
+  // Out-of-sync detection: if user changes rating, services, or comments after generating a draft
+  const isDraftOutOfSync =
+    activeDraft !== null &&
+    (activeDraft.generatedRating !== rating ||
+      (feedbackText || '').trim() !== (activeDraft.generatedFeedback || '').trim() ||
+      activeDraft.generatedServiceIds.length !== (serviceIds || []).length ||
+      (serviceIds || []).some((id) => !activeDraft.generatedServiceIds.includes(id)));
 
   const handleGenerate = async (isRetry = false) => {
     if (disabled || isGeneratingRef.current || isFeatureDisabled || !isBrowserSupported) {
       return;
     }
 
-    // 1. Compulsory Service Selection Validation
+    // 1. Compulsory Rating Selection Validation
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+      setRatingValidationError('Please select an experience rating before polishing with AI.');
+      return;
+    }
+    setRatingValidationError(null);
+
+    // 2. Compulsory Service Selection Validation
     if (!serviceIds || serviceIds.length === 0) {
       setServiceValidationError('Please select at least one service before polishing with AI.');
       return;
     }
     setServiceValidationError(null);
-
-    // 2. Minimum Text Validation
-    if (!hasMinimumText) {
-      return;
-    }
 
     let payloadToSend: DraftGenerationRequestInput;
 
@@ -176,9 +197,9 @@ export function AiDraftAssistant({
 
       payloadToSend = {
         clientDraftId,
-        feedback: feedbackText.trim(),
-        rating: typeof rating === 'number' && rating >= 1 && rating <= 5 ? rating : undefined,
-        serviceIds: serviceIds.length > 0 ? serviceIds : [],
+        feedback: (feedbackText || '').trim(),
+        rating,
+        serviceIds: [...serviceIds],
         language: 'en',
       };
 
@@ -227,7 +248,7 @@ export function AiDraftAssistant({
         setActiveDraft({
           clientDraftId: payloadToSend.clientDraftId,
           backendDraftText: res.draft,
-          generatedFeedback: feedbackText,
+          generatedFeedback: (feedbackText || '').trim(),
           generatedRating: rating,
           generatedServiceIds: [...serviceIds],
         });
@@ -402,6 +423,7 @@ export function AiDraftAssistant({
    * F. If copy fails: closes reserved tab, does not navigate, and shows recoverable error.
    */
   const handlePostOnGoogle = async () => {
+    if (isDraftOutOfSync) return;
     const textToCopy = (editedDraftText || activeDraft?.backendDraftText || '').trim();
     if (!textToCopy) return;
 
@@ -458,7 +480,7 @@ export function AiDraftAssistant({
   }
 
   const isPolishDisabled =
-    !isBrowserSupported || isGenerating || isQuotaExhausted || disabled || !hasMinimumText;
+    !isBrowserSupported || isGenerating || isQuotaExhausted || disabled;
 
   return (
     <div
@@ -523,6 +545,25 @@ export function AiDraftAssistant({
         </span>
       </div>
 
+      {/* Validation notice: Rating selection required */}
+      {ratingValidationError && (
+        <div
+          role="alert"
+          data-testid="ai-rating-validation-error"
+          style={{
+            padding: '12px 14px',
+            backgroundColor: '#FEF2F2',
+            borderRadius: '10px',
+            border: '1px solid #FECACA',
+            fontSize: '13px',
+            color: '#B91C1C',
+            fontWeight: 500,
+          }}
+        >
+          {ratingValidationError}
+        </div>
+      )}
+
       {/* Validation notice: At least 1 service required */}
       {serviceValidationError && (
         <div
@@ -549,16 +590,6 @@ export function AiDraftAssistant({
           style={{ margin: 0, fontSize: '12px', color: '#707978' }}
         >
           AI review assistant is not supported in this browser. Please update your browser to use this feature.
-        </p>
-      )}
-
-      {/* Helper text when input < 10 characters */}
-      {isBrowserSupported && !hasMinimumText && (
-        <p
-          data-testid="ai-min-chars-hint"
-          style={{ margin: 0, fontSize: '12px', color: '#707978' }}
-        >
-          Enter at least 10 characters to polish with AI.
         </p>
       )}
 
@@ -878,6 +909,26 @@ export function AiDraftAssistant({
             </div>
           )}
 
+          {/* Out of sync notice if rating, services, or comments changed */}
+          {isDraftOutOfSync && (
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="ai-draft-out-of-sync-notice"
+              style={{
+                padding: '12px 14px',
+                backgroundColor: '#FFFBEB',
+                borderRadius: '10px',
+                border: '1px solid #FDE68A',
+                fontSize: '13px',
+                color: '#92400E',
+                lineHeight: 1.45,
+              }}
+            >
+              Your rating, services, or comments have changed. Please tap Regenerate to update your review draft before posting on Google.
+            </div>
+          )}
+
           {/* THE EXACTLY TWO FINAL ACTION BUTTONS: Regenerate and Post on Google */}
           <div
             style={{
@@ -892,7 +943,7 @@ export function AiDraftAssistant({
             <button
               type="button"
               data-testid="ai-regenerate-button"
-              disabled={!hasMinimumText || isGenerating || isQuotaExhausted || disabled}
+              disabled={isGenerating || isQuotaExhausted || disabled}
               onClick={() => handleGenerate(false)}
               className="touch-press"
               style={{
@@ -905,8 +956,8 @@ export function AiDraftAssistant({
                 backgroundColor: '#ffffff',
                 color: brandColor || '#006764',
                 border: `1.5px solid ${brandColor || '#006764'}`,
-                cursor: !hasMinimumText || isGenerating || isQuotaExhausted || disabled ? 'not-allowed' : 'pointer',
-                opacity: !hasMinimumText || isGenerating || isQuotaExhausted || disabled ? 0.6 : 1,
+                cursor: isGenerating || isQuotaExhausted || disabled ? 'not-allowed' : 'pointer',
+                opacity: isGenerating || isQuotaExhausted || disabled ? 0.6 : 1,
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -922,11 +973,12 @@ export function AiDraftAssistant({
             {/* Button 2: Post on Google (transitions to direct link when popup is blocked) */}
             {postState.status === 'popup_blocked' ? (
               <a
-                href={googleReviewUrl}
+                href={isDraftOutOfSync ? undefined : googleReviewUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 data-testid="post-to-google-button"
                 className="touch-press"
+                aria-disabled={isDraftOutOfSync}
                 style={{
                   flex: '2 1 180px',
                   minHeight: '48px',
@@ -934,17 +986,23 @@ export function AiDraftAssistant({
                   borderRadius: '12px',
                   fontSize: '15px',
                   fontWeight: 700,
-                  backgroundColor: brandColor || '#006764',
+                  backgroundColor: isDraftOutOfSync ? '#BDC9C7' : (brandColor || '#006764'),
                   color: '#ffffff',
                   textDecoration: 'none',
-                  cursor: 'pointer',
+                  cursor: isDraftOutOfSync ? 'not-allowed' : 'pointer',
+                  opacity: isDraftOutOfSync ? 0.6 : 1,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
-                  boxShadow: '0 4px 12px rgba(0, 103, 100, 0.2)',
+                  boxShadow: isDraftOutOfSync ? 'none' : '0 4px 12px rgba(0, 103, 100, 0.2)',
                   userSelect: 'none',
                   boxSizing: 'border-box',
+                }}
+                onClick={(e) => {
+                  if (isDraftOutOfSync) {
+                    e.preventDefault();
+                  }
                 }}
               >
                 <span>Continue to Google Reviews</span>
@@ -954,6 +1012,7 @@ export function AiDraftAssistant({
               <button
                 type="button"
                 data-testid="post-to-google-button"
+                disabled={isDraftOutOfSync}
                 onClick={handlePostOnGoogle}
                 className="touch-press"
                 style={{
@@ -963,15 +1022,16 @@ export function AiDraftAssistant({
                   borderRadius: '12px',
                   fontSize: '15px',
                   fontWeight: 700,
-                  backgroundColor: brandColor || '#006764',
+                  backgroundColor: isDraftOutOfSync ? '#BDC9C7' : (brandColor || '#006764'),
                   color: '#ffffff',
                   border: 'none',
-                  cursor: 'pointer',
+                  cursor: isDraftOutOfSync ? 'not-allowed' : 'pointer',
+                  opacity: isDraftOutOfSync ? 0.6 : 1,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
-                  boxShadow: '0 4px 12px rgba(0, 103, 100, 0.2)',
+                  boxShadow: isDraftOutOfSync ? 'none' : '0 4px 12px rgba(0, 103, 100, 0.2)',
                   userSelect: 'none',
                   boxSizing: 'border-box',
                 }}

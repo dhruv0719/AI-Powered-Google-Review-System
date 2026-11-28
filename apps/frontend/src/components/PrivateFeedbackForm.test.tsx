@@ -1,5 +1,7 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+/** @vitest-environment jsdom */
+import '@testing-library/jest-dom/vitest';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CustomerReviewFlow } from './CustomerReviewFlow.js';
 import { PrivateFeedbackForm } from './PrivateFeedbackForm.js';
 import { publicApi } from '../services/publicApi.js';
@@ -28,6 +30,11 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
     vi.restoreAllMocks();
   });
 
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
   it('1. should render heading, emoji ratings, services, comments textarea, and unconditional Google Review CTA initially', () => {
     render(<CustomerReviewFlow {...defaultProps} />);
 
@@ -52,7 +59,7 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
     expect(screen.getByText('PPF Installation')).toBeInTheDocument();
 
     // Section E: Customer comments & character counter
-    expect(screen.getByPlaceholderText(/Share details about what went well/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Tell us about your experience/i)).toBeInTheDocument();
     expect(screen.getByTestId('feedback-text-counter')).toHaveTextContent('0/1000 characters');
 
     // Section H: Unconditional Google Review CTA
@@ -125,7 +132,7 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
     // Trigger multiple user interactions concurrently
     fireEvent.click(screen.getByTestId('star-4'));
     fireEvent.click(screen.getByText('Ceramic Coating'));
-    fireEvent.change(screen.getByPlaceholderText(/Share details/i), {
+    fireEvent.change(screen.getByPlaceholderText(/Tell us about your experience/i), {
       target: { value: 'Great experience' },
     });
 
@@ -145,7 +152,7 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
 
     render(<CustomerReviewFlow {...defaultProps} />);
 
-    const textarea = screen.getByPlaceholderText(/Share details/i);
+    const textarea = screen.getByPlaceholderText(/Tell us about your experience/i);
     fireEvent.change(textarea, { target: { value: 'H' } });
     fireEvent.change(textarea, { target: { value: 'He' } });
     fireEvent.change(textarea, { target: { value: 'Hel' } });
@@ -171,7 +178,7 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
     });
 
     // Provide 20 characters comment without selecting any services
-    fireEvent.change(screen.getByPlaceholderText(/Share details/i), {
+    fireEvent.change(screen.getByPlaceholderText(/Tell us about your experience/i), {
       target: { value: 'Outstanding service and friendly staff!' },
     });
 
@@ -201,7 +208,7 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
     render(<CustomerReviewFlow {...defaultProps} />);
 
     fireEvent.click(screen.getByTestId('star-5'));
-    fireEvent.change(screen.getByPlaceholderText(/Share details/i), {
+    fireEvent.change(screen.getByPlaceholderText(/Tell us about your experience/i), {
       target: { value: 'Outstanding service and friendly staff!' },
     });
 
@@ -258,7 +265,7 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
   it('10. should prevent iOS Safari auto-zoom with 16px font size on textareas', () => {
     render(<CustomerReviewFlow {...defaultProps} />);
 
-    const textarea = screen.getByPlaceholderText(/Share details/i);
+    const textarea = screen.getByPlaceholderText(/Tell us about your experience/i);
     // iOS Safari auto-zooms text inputs with font-size < 16px
     expect(textarea).toHaveStyle({ fontSize: '16px' });
   });
@@ -266,7 +273,7 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
   it('11. should link character counter via aria-describedby and announce via aria-live="polite"', () => {
     render(<CustomerReviewFlow {...defaultProps} />);
 
-    const textarea = screen.getByPlaceholderText(/Share details/i);
+    const textarea = screen.getByPlaceholderText(/Tell us about your experience/i);
     const counter = screen.getByTestId('feedback-text-counter');
 
     expect(textarea).toHaveAttribute('aria-describedby', 'feedback-text-counter');
@@ -308,10 +315,12 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
 
     render(<CustomerReviewFlow {...defaultProps} />);
 
+    // Select rating
+    fireEvent.click(screen.getByTestId('star-5'));
     // Select service
     fireEvent.click(screen.getByText('Ceramic Coating'));
     // Type feedback
-    const textarea = screen.getByPlaceholderText(/Share details/i);
+    const textarea = screen.getByPlaceholderText(/Tell us about your experience/i);
     fireEvent.change(textarea, { target: { value: 'Customer input of sufficient length' } });
 
     // Click Polish while session is pending
@@ -344,8 +353,9 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
 
     render(<CustomerReviewFlow {...defaultProps} />);
 
+    fireEvent.click(screen.getByTestId('star-5'));
     fireEvent.click(screen.getByText('Ceramic Coating'));
-    fireEvent.change(screen.getByPlaceholderText(/Share details/i), {
+    fireEvent.change(screen.getByPlaceholderText(/Tell us about your experience/i), {
       target: { value: 'Great detailing and friendly staff!' },
     });
 
@@ -388,7 +398,7 @@ describe('CustomerReviewFlow Component (Unified Review Journey)', () => {
     // Customer selects emoji rating 5, service, and enters text
     fireEvent.click(screen.getByTestId('star-5'));
     fireEvent.click(screen.getByText('Ceramic Coating'));
-    const textarea = screen.getByPlaceholderText(/Share details/i);
+    const textarea = screen.getByPlaceholderText(/Tell us about your experience/i);
     fireEvent.change(textarea, { target: { value: 'Preserve my entered details across error!' } });
 
     // Click Polish -> fails at session creation

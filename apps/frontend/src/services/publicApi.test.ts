@@ -257,7 +257,8 @@ describe('publicApi service', () => {
       const result = await publicApi.generateAiDraft('q_testCode123', {
         clientDraftId: 'c1234567-89ab-4cde-8f01-23456789abcd',
         feedback: 'Too short',
-        serviceIds: [],
+        rating: 5,
+        serviceIds: ['s1234567-89ab-4cde-8f01-23456789abcd'],
       });
 
       expect(result.status).toBe('insufficient_context');

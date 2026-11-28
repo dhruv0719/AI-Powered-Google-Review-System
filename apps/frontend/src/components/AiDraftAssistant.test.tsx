@@ -32,65 +32,76 @@ describe('AiDraftAssistant Component', () => {
   });
 
   // =========================================================================
-  // 1. Threshold Activation and Explicit Generation Action
+  // 1. Validation and Generation Action
   // =========================================================================
-  it('1a. should disable Polish button when feedback is fewer than 10 ordinary characters', () => {
-    render(<AiDraftAssistant {...defaultProps} feedbackText="Good food" />);
+  it('1a. should show validation error when rating is not selected upon clicking Polish button', () => {
+    const apiSpy = vi.spyOn(publicApi, 'generateAiDraft');
+    render(<AiDraftAssistant {...defaultProps} rating={null} />);
 
     const button = screen.getByRole('button', { name: /polish with ai/i });
-    expect(button).toBeDisabled();
-    expect(screen.getByTestId('ai-min-chars-hint')).toHaveTextContent(
-      'Enter at least 10 characters to polish with AI.'
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+
+    expect(screen.getByTestId('ai-rating-validation-error')).toHaveTextContent(
+      'Please select an experience rating before polishing with AI.'
     );
+    expect(apiSpy).not.toHaveBeenCalled();
   });
 
-  it('1b. should count Unicode combining characters as user-perceived graphemes', () => {
-    // 9 combining characters ('e' + combining acute = 1 grapheme, 2 code units)
-    // String length is 18 UTF-16 code units, but exactly 9 graphemes
-    const nineCombiningChars = 'e\u0301'.repeat(9);
-    const { rerender } = render(
-      <AiDraftAssistant {...defaultProps} feedbackText={nineCombiningChars} />
-    );
+  it('1b. should enable Polish button and generate review even when feedback is empty', async () => {
+    const mockResponse = {
+      status: 'generated' as const,
+      draft: 'The car detailing was executed with meticulous attention to detail.',
+      generationsRemaining: 2,
+      isReplay: false,
+    };
+    const apiSpy = vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue(mockResponse);
+
+    render(<AiDraftAssistant {...defaultProps} feedbackText="" />);
 
     const button = screen.getByRole('button', { name: /polish with ai/i });
-    expect(button).toBeDisabled();
-    expect(screen.getByTestId('ai-min-chars-hint')).toBeInTheDocument();
-
-    // 10 combining characters (20 code units, exactly 10 graphemes)
-    const tenCombiningChars = 'e\u0301'.repeat(10);
-    rerender(<AiDraftAssistant {...defaultProps} feedbackText={tenCombiningChars} />);
     expect(button).not.toBeDisabled();
-    expect(screen.queryByTestId('ai-min-chars-hint')).not.toBeInTheDocument();
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(apiSpy).toHaveBeenCalledWith(
+        'q_testCampaign123',
+        expect.objectContaining({
+          feedback: '',
+          rating: 5,
+          serviceIds: ['srv_1', 'srv_2'],
+        })
+      );
+    });
+    expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
   });
 
-  it('1c. should count complex emojis and flags as user-perceived graphemes', () => {
-    // Family emoji: '👨‍👩‍👧‍👦' (11 UTF-16 code units with ZWJ, exactly 1 grapheme)
-    // 5 family emojis = 55 UTF-16 code units, but only 5 graphemes
-    const fiveComplexEmojis = '👨‍👩‍👧‍👦'.repeat(5);
-    const { rerender } = render(
-      <AiDraftAssistant {...defaultProps} feedbackText={fiveComplexEmojis} />
-    );
+  it('1c. should enable Polish button and generate review with short comments (< 10 graphemes)', async () => {
+    const mockResponse = {
+      status: 'generated' as const,
+      draft: 'The car detailing was executed with meticulous attention to detail.',
+      generationsRemaining: 2,
+      isReplay: false,
+    };
+    const apiSpy = vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue(mockResponse);
+
+    render(<AiDraftAssistant {...defaultProps} feedbackText="Good job" />);
 
     const button = screen.getByRole('button', { name: /polish with ai/i });
-    expect(button).toBeDisabled();
-    expect(screen.getByTestId('ai-min-chars-hint')).toBeInTheDocument();
-
-    // 10 family emojis = 110 UTF-16 code units, exactly 10 graphemes
-    const tenComplexEmojis = '👨‍👩‍👧‍👦'.repeat(10);
-    rerender(<AiDraftAssistant {...defaultProps} feedbackText={tenComplexEmojis} />);
     expect(button).not.toBeDisabled();
-    expect(screen.queryByTestId('ai-min-chars-hint')).not.toBeInTheDocument();
+    fireEvent.click(button);
 
-    // Flag emoji: '🇺🇸' (4 UTF-16 code units, exactly 1 grapheme)
-    // 9 flag emojis = 36 code units, 9 graphemes
-    const nineFlagEmojis = '🇺🇸'.repeat(9);
-    rerender(<AiDraftAssistant {...defaultProps} feedbackText={nineFlagEmojis} />);
-    expect(button).toBeDisabled();
-
-    // 10 flag emojis = 40 code units, 10 graphemes
-    const tenFlagEmojis = '🇺🇸'.repeat(10);
-    rerender(<AiDraftAssistant {...defaultProps} feedbackText={tenFlagEmojis} />);
-    expect(button).not.toBeDisabled();
+    await waitFor(() => {
+      expect(apiSpy).toHaveBeenCalledWith(
+        'q_testCampaign123',
+        expect.objectContaining({
+          feedback: 'Good job',
+          rating: 5,
+          serviceIds: ['srv_1', 'srv_2'],
+        })
+      );
+    });
+    expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
   });
 
   it('1d. should gracefully disable AI generation with a clear message when Intl.Segmenter is unavailable', () => {
@@ -347,6 +358,55 @@ describe('AiDraftAssistant Component', () => {
     expect(screen.getByTestId('ai-quota-indicator')).toHaveTextContent(
       'Draft limit reached (3/3 used)'
     );
+  });
+
+  it('10b. should display out-of-sync warning and disable Post on Google when rating or services or comments change', async () => {
+    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+      status: 'generated',
+      draft: 'Initial draft for 5-star experience.',
+      generationsRemaining: 2,
+      isReplay: false,
+    });
+
+    const { rerender } = render(<AiDraftAssistant {...defaultProps} rating={5} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('ai-draft-out-of-sync-notice')).not.toBeInTheDocument();
+    const postBtn = screen.getByTestId('post-to-google-button');
+    expect(postBtn).not.toBeDisabled();
+
+    // 1. Change rating to 4
+    rerender(<AiDraftAssistant {...defaultProps} rating={4} />);
+    expect(screen.getByTestId('ai-draft-out-of-sync-notice')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-draft-out-of-sync-notice')).toHaveTextContent(
+      'Your rating, services, or comments have changed. Please tap Regenerate'
+    );
+    expect(screen.getByTestId('post-to-google-button')).toBeDisabled();
+
+    // 2. Restore rating back to 5 -> notice disappears and button re-enabled!
+    rerender(<AiDraftAssistant {...defaultProps} rating={5} />);
+    expect(screen.queryByTestId('ai-draft-out-of-sync-notice')).not.toBeInTheDocument();
+    expect(screen.getByTestId('post-to-google-button')).not.toBeDisabled();
+
+    // 3. Change services
+    rerender(<AiDraftAssistant {...defaultProps} serviceIds={['srv_1']} />);
+    expect(screen.getByTestId('ai-draft-out-of-sync-notice')).toBeInTheDocument();
+    expect(screen.getByTestId('post-to-google-button')).toBeDisabled();
+
+    // 4. Change comments
+    rerender(
+      <AiDraftAssistant
+        {...defaultProps}
+        serviceIds={['srv_1', 'srv_2']}
+        feedbackText="Different feedback"
+      />
+    );
+    expect(screen.getByTestId('ai-draft-out-of-sync-notice')).toBeInTheDocument();
+    expect(screen.getByTestId('post-to-google-button')).toBeDisabled();
   });
 
   // =========================================================================
