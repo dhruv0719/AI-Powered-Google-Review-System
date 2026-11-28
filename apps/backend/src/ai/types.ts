@@ -59,6 +59,7 @@ export interface AiPromptMessage {
 export interface AiGenerationOptions {
   promptMessages: AiPromptMessage[];
   language?: string;
+  temperature?: number;
   signal?: AbortSignal;
 }
 

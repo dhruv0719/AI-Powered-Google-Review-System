@@ -130,18 +130,20 @@ export class OutputValidationPipeline {
    */
   public static validate(
     candidateDraft: string,
-    sanitizedSourceText: string
+    sanitizedSourceText: string,
+    rating?: number
   ): OutputValidationResult {
     const draft = candidateDraft.trim();
 
-    // 1. Grapheme length validation
+    // 1. Grapheme length validation (Draft must be at least 10 graphemes)
+    const minDraftLength = AiAssistantConstants.MIN_DRAFT_LENGTH ?? 10;
     const graphemeCount = Array.from(this.graphemeSegmenter.segment(draft)).length;
 
-    if (graphemeCount < AiAssistantConstants.MIN_FEEDBACK_LENGTH) {
+    if (graphemeCount < minDraftLength) {
       return {
         isValid: false,
         reasonCode: 'OUTPUT_TOO_SHORT',
-        message: `Draft must be at least ${AiAssistantConstants.MIN_FEEDBACK_LENGTH} characters`,
+        message: `Draft must be at least ${minDraftLength} characters`,
       };
     }
 
@@ -221,11 +223,12 @@ export class OutputValidationPipeline {
     const lowerSource = sanitizedSourceText.toLowerCase();
     const lowerDraft = draft.toLowerCase();
 
-    // Check if input was purely negative
+    // Check if input was purely negative or rating is negative
+    const isNegativeRating = typeof rating === 'number' && (rating === 1 || rating === 2);
     const hasGrievance = this.GRIEVANCE_WORDS.some((w) => lowerSource.includes(w));
     const hasPositiveInSource = this.PRAISE_WORDS.some((w) => lowerSource.includes(w));
 
-    if (hasGrievance && !hasPositiveInSource) {
+    if ((hasGrievance && !hasPositiveInSource) || (isNegativeRating && !hasPositiveInSource)) {
       const hasHallucinatedPraise = this.PRAISE_WORDS.some((w) => lowerDraft.includes(w));
       if (hasHallucinatedPraise) {
         return {

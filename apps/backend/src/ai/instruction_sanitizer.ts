@@ -89,13 +89,12 @@ export class DeterministicInstructionSanitizer {
    */
   public static sanitize(input: string, _languageHint?: string): SanitizerResult {
     const normalized = input.normalize('NFC').trim();
-    const graphemeLength = this.countGraphemes(normalized);
 
-    if (graphemeLength < AiAssistantConstants.MIN_FEEDBACK_LENGTH) {
+    if (normalized.length === 0) {
       return {
-        category: 'INSUFFICIENT_CONTEXT',
-        acceptedExperienceText: null,
-        reasonCode: 'INPUT_TOO_SHORT',
+        category: 'UNCHANGED',
+        acceptedExperienceText: '',
+        reasonCode: null,
       };
     }
 

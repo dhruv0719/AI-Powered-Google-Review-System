@@ -179,8 +179,24 @@ export class MockAiProvider implements AiProvider {
       const jsonStart = userMsg.content.indexOf('{');
       if (jsonStart !== -1) {
         const parsed = JSON.parse(userMsg.content.slice(jsonStart));
-        if (typeof parsed.customer_feedback === 'string') {
-          return parsed.customer_feedback;
+        if (typeof parsed.customer_feedback === 'string' && parsed.customer_feedback.trim().length > 0) {
+          const feedback = parsed.customer_feedback.trim();
+          if (feedback.length < 10 && Array.isArray(parsed.selected_services) && parsed.selected_services.length > 0) {
+            const servicesList = parsed.selected_services.join(', ');
+            return `${feedback} I had a good experience with ${servicesList}.`;
+          }
+          return feedback;
+        }
+        if (Array.isArray(parsed.selected_services) && parsed.selected_services.length > 0) {
+          const servicesList = parsed.selected_services.join(', ');
+          const rating = parsed.experience_rating ?? 5;
+          if (rating >= 4) {
+            return `I had a great overall experience with ${servicesList}. Highly recommend!`;
+          } else if (rating <= 2) {
+            return `I was not satisfied with the ${servicesList} service. It did not meet my expectations.`;
+          } else {
+            return `The service for ${servicesList} was average. Okay overall experience.`;
+          }
         }
       }
     } catch {

@@ -43,8 +43,8 @@ export class GroqAiProvider implements AiProvider {
 
     // 1.5. Bound prompt message length defensively to protect token consumption
     const totalChars = options.promptMessages.reduce((sum, msg) => sum + msg.content.length, 0);
-    if (totalChars > 4000) {
-      throw new AiMalformedResponseError('Total prompt character length exceeds maximum safety ceiling (4000)');
+    if (totalChars > 8000) {
+      throw new AiMalformedResponseError('Total prompt character length exceeds maximum safety ceiling (8000)');
     }
 
     // 2. Build structured output JSON Schema payload for review draft
@@ -55,7 +55,7 @@ export class GroqAiProvider implements AiProvider {
         content: msg.content,
       })),
       max_completion_tokens: 500, // Enforce strict 500 completion token ceiling
-      temperature: 0.2,
+      temperature: options.temperature ?? 0.8,
       reasoning_effort: 'low',
       include_reasoning: false,
       response_format: {

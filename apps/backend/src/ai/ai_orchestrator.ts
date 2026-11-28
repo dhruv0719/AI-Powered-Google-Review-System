@@ -1,10 +1,13 @@
 import crypto from 'node:crypto';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getEnv } from '../config/env.js';
 import {
   DraftGenerationRequestInput,
   DraftGenerationResponseDTO,
   AiAssistantConstants,
+  RATING_SENTIMENT_MAP,
 } from '@review-system/shared';
+import { services } from '../drizzle/schema.js';
 import { MeaningfulInputValidator } from './input_validator.js';
 import { DeterministicInstructionSanitizer } from './instruction_sanitizer.js';
 import { ThirdPartyAllegationGuard } from './third_party_allegation_guard.js';
@@ -80,10 +83,24 @@ export class AiOrchestrator {
       throw new FeatureDisabledError();
     }
 
-    // 2. Language canonicalization
+    // 2. Rating & Service validation
+    if (
+      typeof input.rating !== 'number' ||
+      !Number.isInteger(input.rating) ||
+      input.rating < 1 ||
+      input.rating > 5
+    ) {
+      throw new AiValidationError('Experience rating must be an integer between 1 and 5');
+    }
+
+    if (!input.serviceIds || !Array.isArray(input.serviceIds) || input.serviceIds.length === 0) {
+      throw new AiValidationError('Please select at least one service');
+    }
+
+    // 3. Language canonicalization
     const canonicalLanguage = canonicalizeLanguage(input.language);
 
-    // 3. Compute deterministic payload fingerprint
+    // 4. Compute deterministic payload fingerprint
     const payloadFingerprint = computePayloadFingerprint({
       feedback: input.feedback,
       rating: input.rating,
@@ -91,7 +108,7 @@ export class AiOrchestrator {
       language: input.language,
     });
 
-    // 4. Session validity and idempotency replay check (single indexed read, no locks)
+    // 5. Session validity and idempotency replay check (single indexed read, no locks)
     const replayCheck = await checkSessionAndReplay(
       db,
       sessionId,
@@ -110,68 +127,95 @@ export class AiOrchestrator {
 
     const sessionContext = replayCheck.sessionContext!;
 
-    // 5. Deterministic Instruction Sanitization (in-memory BEFORE lease reservation)
-    const sanitizationResult = DeterministicInstructionSanitizer.sanitize(
-      input.feedback,
-      canonicalLanguage
-    );
+    // 5.1. Authoritative configured service validation
+    const uniqueServiceIds = Array.from(new Set(input.serviceIds));
+    const dbServices = await db
+      .select({
+        id: services.id,
+        name: services.name,
+      })
+      .from(services)
+      .where(
+        and(
+          eq(services.tenantId, sessionContext.tenantId),
+          eq(services.locationId, sessionContext.locationId),
+          eq(services.isActive, true),
+          inArray(services.id, uniqueServiceIds)
+        )
+      );
 
-    if (
-      sanitizationResult.category === 'INSUFFICIENT_CONTEXT' ||
-      sanitizationResult.category === 'AMBIGUOUS' ||
-      !sanitizationResult.acceptedExperienceText
-    ) {
-      // Instruction-only, attack-only, or ambiguous inputs consume 0 quota and 0 leases
-      return {
-        status: 'insufficient_context',
-        draft: null,
-        generationsRemaining: sessionContext.generationsRemaining,
-        isReplay: false,
-      };
+    if (dbServices.length !== uniqueServiceIds.length) {
+      throw new AiValidationError('One or more selected services are invalid or inactive for this location');
     }
+    const authoritativeServiceNames = dbServices.map((s: any) => s.name);
 
-    const acceptedExperience = sanitizationResult.acceptedExperienceText;
+    // 5.2. Optional customer-written feedback handling
+    const rawFeedback = (input.feedback ?? '').trim();
+    let sanitizedExperience = '';
 
-    // 5.5. Third-Party Allegation Guard (in-memory BEFORE lease reservation)
-    // Refuses feedback containing explicit allegations against unrelated third parties
-    const allegationCheck = ThirdPartyAllegationGuard.check(acceptedExperience, {
-      tenantName: sessionContext.tenantName,
-      locationName: sessionContext.locationName,
-    });
+    if (rawFeedback.length > 0) {
+      // Deterministic Instruction Sanitization (in-memory BEFORE lease reservation)
+      const sanitizationResult = DeterministicInstructionSanitizer.sanitize(
+        rawFeedback,
+        canonicalLanguage
+      );
 
-    if (allegationCheck.isAllegationDetected) {
-      // Third-party smears consume 0 quota, 0 leases, and 0 provider calls
-      return {
-        status: 'insufficient_context',
-        draft: null,
-        generationsRemaining: sessionContext.generationsRemaining,
-        isReplay: false,
-      };
-    }
-
-    // 6. Semantic input validation (in-memory on accepted experience BEFORE lease reservation)
-    const validationResult = MeaningfulInputValidator.validate(
-      acceptedExperience,
-      canonicalLanguage
-    );
-
-    if (!validationResult.isValid) {
-      if (validationResult.reasonCode === 'INPUT_TOO_LONG') {
-        throw new AiValidationError(validationResult.message);
+      if (
+        sanitizationResult.category === 'INSUFFICIENT_CONTEXT' ||
+        sanitizationResult.category === 'AMBIGUOUS' ||
+        !sanitizationResult.acceptedExperienceText
+      ) {
+        // Instruction-only, attack-only, or ambiguous inputs consume 0 quota and 0 leases
+        return {
+          status: 'insufficient_context',
+          draft: null,
+          generationsRemaining: sessionContext.generationsRemaining,
+          isReplay: false,
+        };
       }
 
-      // Semantic failures (too short, low diversity, spam, mash) consume 0 quota and 0 leases
-      return {
-        status: 'insufficient_context',
-        draft: null,
-        generationsRemaining: sessionContext.generationsRemaining,
-        isReplay: false,
-      };
-    }
+      const acceptedExperience = sanitizationResult.acceptedExperienceText;
 
-    // 7. PII Redaction (strictly on accepted customer experience)
-    const redactionResult = PiiRedactor.redact(acceptedExperience);
-    const sanitizedExperience = redactionResult.sanitizedText;
+      // Third-Party Allegation Guard (in-memory BEFORE lease reservation)
+      const allegationCheck = ThirdPartyAllegationGuard.check(acceptedExperience, {
+        tenantName: sessionContext.tenantName,
+        locationName: sessionContext.locationName,
+      });
+
+      if (allegationCheck.isAllegationDetected) {
+        // Third-party smears consume 0 quota, 0 leases, and 0 provider calls
+        return {
+          status: 'insufficient_context',
+          draft: null,
+          generationsRemaining: sessionContext.generationsRemaining,
+          isReplay: false,
+        };
+      }
+
+      // Semantic input validation (in-memory on accepted experience BEFORE lease reservation)
+      const validationResult = MeaningfulInputValidator.validate(
+        acceptedExperience,
+        canonicalLanguage
+      );
+
+      if (!validationResult.isValid) {
+        if (validationResult.reasonCode === 'INPUT_TOO_LONG') {
+          throw new AiValidationError(validationResult.message);
+        }
+
+        // Semantic failures (spam, mash, low diversity) consume 0 quota and 0 leases
+        return {
+          status: 'insufficient_context',
+          draft: null,
+          generationsRemaining: sessionContext.generationsRemaining,
+          isReplay: false,
+        };
+      }
+
+      // PII Redaction (strictly on accepted customer experience)
+      const redactionResult = PiiRedactor.redact(acceptedExperience);
+      sanitizedExperience = redactionResult.sanitizedText;
+    }
 
     // 8. Phase 1: Atomic Lease Reservation (30 seconds via clock_timestamp)
     const lockToken = crypto.randomUUID();
@@ -186,10 +230,20 @@ export class AiOrchestrator {
       options?.timeoutMs ??
       (AiAssistantConstants.LOCK_LEASE_DURATION_SECONDS / 2) * 1000; // 15_000 ms
 
-    const promptMessages = PromptEngine.buildPromptMessages(
-      sanitizedExperience,
-      canonicalLanguage
-    );
+    const ratingMeta = (typeof input.rating === 'number' && RATING_SENTIMENT_MAP[input.rating]) || {
+      label: 'Rating ' + input.rating,
+      sentiment: 'Neutral',
+    };
+
+    const promptMessages = PromptEngine.buildPromptMessages({
+      rating: input.rating,
+      ratingLabel: ratingMeta.label,
+      sentiment: ratingMeta.sentiment,
+      services: authoritativeServiceNames,
+      customerFeedback: sanitizedExperience.length > 0 ? sanitizedExperience : null,
+      businessName: sessionContext.tenantName,
+      language: canonicalLanguage,
+    });
 
     // Dynamic token estimation based on input size + 500 completion token ceiling
     const estimatedTokens = budgetGuard.estimateTokens(promptMessages, 500);
@@ -215,6 +269,7 @@ export class AiOrchestrator {
         aiResult = await provider.generateDraft({
           promptMessages,
           language: canonicalLanguage,
+          temperature: 0.8,
           signal: controller.signal,
         });
       } finally {
@@ -236,10 +291,11 @@ export class AiOrchestrator {
         };
       }
 
-      // 10. Output Guardrail Validation (grounded strictly against accepted experience)
+      // 10. Output Guardrail Validation (grounded strictly against accepted experience and rating)
       const guardrailResult = OutputValidationPipeline.validate(
         aiResult.draft,
-        sanitizedExperience
+        sanitizedExperience,
+        input.rating
       );
 
       if (!guardrailResult.isValid) {

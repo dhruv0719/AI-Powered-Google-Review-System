@@ -35,6 +35,13 @@ export class MeaningfulInputValidator {
    */
   public static validate(rawInput: string, languageHint?: string): InputValidationResult {
     const normalized = rawInput.normalize('NFC').trim();
+    if (normalized.length === 0) {
+      return {
+        isValid: true,
+        graphemeCount: 0,
+        wordCount: 0,
+      };
+    }
 
     // 1. Grapheme cluster extraction
     const graphemeSegments = Array.from(
@@ -44,14 +51,6 @@ export class MeaningfulInputValidator {
     const graphemeCount = graphemeSegments.length;
 
     // 2. Grapheme length bounds
-    if (graphemeCount < AiAssistantConstants.MIN_FEEDBACK_LENGTH) {
-      return {
-        isValid: false,
-        reasonCode: 'INPUT_TOO_SHORT',
-        message: `Feedback must contain at least ${AiAssistantConstants.MIN_FEEDBACK_LENGTH} characters`,
-      };
-    }
-
     if (graphemeCount > AiAssistantConstants.MAX_FEEDBACK_LENGTH) {
       return {
         isValid: false,
@@ -60,7 +59,7 @@ export class MeaningfulInputValidator {
       };
     }
 
-    // 3. Substantive word count (>= 2 substantive words required)
+    // 3. Substantive word extraction
     const langKey = languageHint && languageHint in this.wordSegmenters ? languageHint : 'en';
     const wordSegmenter = this.wordSegmenters[langKey];
     const wordSegments = Array.from(wordSegmenter.segment(normalized));
@@ -68,14 +67,6 @@ export class MeaningfulInputValidator {
     const substantiveWords = wordSegments
       .filter((s) => s.isWordLike && /[\p{L}\p{N}]/u.test(s.segment))
       .map((s) => s.segment);
-
-    if (substantiveWords.length < 2) {
-      return {
-        isValid: false,
-        reasonCode: 'INSUFFICIENT_WORDS',
-        message: 'Feedback must contain at least two substantive words',
-      };
-    }
 
     // 4. Repeated grapheme flood check (consecutive run >= 8)
     let maxRun = 1;
@@ -103,7 +94,7 @@ export class MeaningfulInputValidator {
     const nonWs = graphemeSegments.filter((g) => g.trim().length > 0);
     const distinctGraphemes = new Set(nonWs.map((g) => g.toLowerCase()));
 
-    if (distinctGraphemes.size <= 2) {
+    if (nonWs.length >= 6 && distinctGraphemes.size <= 2) {
       return {
         isValid: false,
         reasonCode: 'LOW_CHARACTER_DIVERSITY',
@@ -118,7 +109,7 @@ export class MeaningfulInputValidator {
       charCounts.set(lower, (charCounts.get(lower) || 0) + 1);
     }
     for (const count of charCounts.values()) {
-      if (count / nonWs.length > 0.75) {
+      if (nonWs.length >= 4 && count / nonWs.length > 0.75) {
         return {
           isValid: false,
           reasonCode: 'LOW_CHARACTER_DIVERSITY',
