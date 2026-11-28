@@ -98,8 +98,18 @@ export const AiAssistantConstants = {
   LOCK_LEASE_DURATION_SECONDS: 30,
   MIN_FEEDBACK_LENGTH: 10,
   MAX_FEEDBACK_LENGTH: 500,
+  MIN_DRAFT_LENGTH: 10,
   DEFAULT_LANGUAGE: 'en',
+  DEFAULT_TEMPERATURE: 0.8,
 } as const;
+
+export const RATING_SENTIMENT_MAP: Record<number, { label: string; sentiment: string }> = {
+  1: { label: 'Very bad', sentiment: 'Strongly negative' },
+  2: { label: 'Bad', sentiment: 'Negative' },
+  3: { label: 'Okay', sentiment: 'Neutral' },
+  4: { label: 'Good', sentiment: 'Positive' },
+  5: { label: 'Excellent', sentiment: 'Very positive' },
+};
 
 export const DEFAULT_BRAND_COLOR = '#2563EB';
 export const BRAND_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;

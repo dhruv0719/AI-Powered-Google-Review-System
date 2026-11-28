@@ -7,19 +7,17 @@ export const DraftGenerationRequestSchema = z.object({
     .uuid({ message: 'Client draft ID must be a valid UUID' }),
   feedback: z
     .string()
-    .trim()
-    .min(1, { message: 'Feedback text is required' })
-    .max(2000, { message: 'Feedback payload exceeds maximum allowed size' }),
+    .max(2000, { message: 'Feedback payload exceeds maximum allowed size' })
+    .optional()
+    .default(''),
   rating: z
-    .number()
+    .number({ message: 'Experience rating is required' })
     .int({ message: 'Rating must be an integer' })
-    .min(1, { message: 'Rating must be at least 1' })
-    .max(5, { message: 'Rating cannot exceed 5' })
-    .optional(),
+    .min(1, { message: 'Rating must be between 1 and 5' })
+    .max(5, { message: 'Rating must be between 1 and 5' }),
   serviceIds: z
     .array(z.string().uuid({ message: 'Invalid service ID' }))
-    .optional()
-    .default([]),
+    .min(1, { message: 'At least one service must be selected' }),
   language: z
     .string()
     .trim()
