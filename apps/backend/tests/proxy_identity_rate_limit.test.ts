@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { eq } from 'drizzle-orm';
 import { FastifyInstance } from 'fastify';
 import { createTestApp } from './setup.js';
 import {
@@ -10,6 +11,7 @@ import {
   locations,
   qrCampaigns,
   ephemeralSessions,
+  services,
 } from '../src/drizzle/schema.js';
 import {
   CustomerSessionConstants,
@@ -51,6 +53,48 @@ describe('Proxy Identity Assertion & Rate-Limit Remediation Tests (Phase 8.4.5.2
     });
     app = testSetup.app;
     db = testSetup.db;
+
+    const origInject = app.inject.bind(app);
+    (app as any).inject = async (opts: any) => {
+      if (
+        opts &&
+        typeof opts.url === 'string' &&
+        opts.url.includes('/generate-draft') &&
+        opts.payload &&
+        typeof opts.payload === 'object' &&
+        !Array.isArray(opts.payload)
+      ) {
+        if (opts.payload.rating === undefined) {
+          opts.payload.rating = 5;
+        }
+        if (opts.payload.serviceIds === undefined) {
+          const match = opts.url.match(/\/qr\/([^/]+)\/generate-draft/);
+          if (match) {
+            const code = match[1];
+            let locationId: string | undefined;
+            const [c] = await db.select().from(qrCampaigns).where(eq(qrCampaigns.code, code));
+            if (c) {
+              locationId = c.locationId;
+            } else {
+              const [sess] = await db
+                .select()
+                .from(ephemeralSessions)
+                .where(eq(ephemeralSessions.issuedCode, code));
+              if (sess) {
+                locationId = sess.locationId;
+              }
+            }
+            if (locationId) {
+              const svcs = await db.select().from(services).where(eq(services.locationId, locationId));
+              if (svcs.length > 0) {
+                opts.payload.serviceIds = [svcs[0].id];
+              }
+            }
+          }
+        }
+      }
+      return origInject(opts);
+    };
   });
 
   afterEach(() => {
@@ -88,7 +132,16 @@ describe('Proxy Identity Assertion & Rate-Limit Remediation Tests (Phase 8.4.5.2
       })
       .returning();
 
-    return { tenant: t, location: l, campaign: c };
+    const [s] = await db
+      .insert(services)
+      .values({
+        tenantId: t.id,
+        locationId: l.id,
+        name: 'Proxy Service',
+      })
+      .returning();
+
+    return { tenant: t, location: l, campaign: c, service: s };
   }
 
   async function createSession(code: string, clientIp: string) {

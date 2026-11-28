@@ -4,11 +4,11 @@ import { BOUNDARY_FIXTURES, MULTILINGUAL_FIXTURES } from './fixtures/ai_fixtures
 
 describe('MeaningfulInputValidator Unit Tests', () => {
   describe('Boundary Tests (Grapheme & Word Bounds)', () => {
-    it('rejects input with exactly 9 graphemes (INPUT_TOO_SHORT)', () => {
+    it('accepts input with fewer than 10 graphemes as optional customer feedback', () => {
       const res = MeaningfulInputValidator.validate(BOUNDARY_FIXTURES.exact9Graphemes.text);
-      expect(res.isValid).toBe(false);
-      if (!res.isValid) {
-        expect(res.reasonCode).toBe('INPUT_TOO_SHORT');
+      expect(res.isValid).toBe(true);
+      if (res.isValid) {
+        expect(res.graphemeCount).toBe(9);
       }
     });
 
@@ -21,11 +21,12 @@ describe('MeaningfulInputValidator Unit Tests', () => {
       }
     });
 
-    it('rejects input with exactly 10 graphemes but only 1 substantive word (INSUFFICIENT_WORDS)', () => {
+    it('accepts single-word input as optional customer feedback', () => {
       const res = MeaningfulInputValidator.validate(BOUNDARY_FIXTURES.exact10Graphemes1Word.text);
-      expect(res.isValid).toBe(false);
-      if (!res.isValid) {
-        expect(res.reasonCode).toBe('INSUFFICIENT_WORDS');
+      expect(res.isValid).toBe(true);
+      if (res.isValid) {
+        expect(res.graphemeCount).toBe(10);
+        expect(res.wordCount).toBe(1);
       }
     });
 

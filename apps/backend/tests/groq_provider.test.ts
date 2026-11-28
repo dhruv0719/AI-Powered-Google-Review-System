@@ -12,6 +12,7 @@ import { createTestApp } from './setup.js';
 import {
   tenants,
   locations,
+  services,
   qrCampaigns,
   ephemeralSessions,
 } from '../src/drizzle/schema.js';
@@ -142,7 +143,7 @@ describe('GroqAiProvider Unit & Integration Tests', () => {
     expect(capturedBody).toBeDefined();
     expect(capturedBody.model).toBe('openai/gpt-oss-20b');
     expect(capturedBody.max_completion_tokens).toBe(500);
-    expect(capturedBody.temperature).toBe(0.2);
+    expect(capturedBody.temperature).toBe(0.8);
     expect(capturedBody.reasoning_effort).toBe('low');
     expect(capturedBody.include_reasoning).toBe(false);
     expect(capturedBody.reasoning_format).toBeUndefined();
@@ -364,9 +365,9 @@ describe('GroqAiProvider Unit & Integration Tests', () => {
   });
 
   // 13.5. Bound Prompt Length
-  it('throws AiMalformedResponseError when prompt input character length exceeds 4000', async () => {
+  it('throws AiMalformedResponseError when prompt input character length exceeds 8000', async () => {
     const provider = new GroqAiProvider({ apiKey: TEST_API_KEY });
-    const hugeMessage = { role: 'user' as const, content: 'x'.repeat(4001) };
+    const hugeMessage = { role: 'user' as const, content: 'x'.repeat(8001) };
 
     await expect(provider.generateDraft({ promptMessages: [hugeMessage] })).rejects.toThrow(
       AiMalformedResponseError
@@ -594,6 +595,16 @@ describe('GroqAiProvider Unit & Integration Tests', () => {
       const sessionToken = crypto.randomBytes(32).toString('hex');
       const tokenHash = crypto.createHash('sha256').update(sessionToken).digest('hex');
 
+      const [svc] = await db
+        .insert(services)
+        .values({
+          tenantId: t.id,
+          locationId: l.id,
+          name: 'Food Service',
+          isActive: true,
+        })
+        .returning();
+
       const [s] = await db
         .insert(ephemeralSessions)
         .values({
@@ -614,7 +625,7 @@ describe('GroqAiProvider Unit & Integration Tests', () => {
         clientDraftId,
         feedback: 'Food was delicious and staff friendly.',
         rating: 5,
-        serviceIds: [],
+        serviceIds: [svc.id],
         language: 'en',
       });
 
@@ -628,7 +639,7 @@ describe('GroqAiProvider Unit & Integration Tests', () => {
         clientDraftId,
         feedback: 'Food was delicious and staff friendly.',
         rating: 5,
-        serviceIds: [],
+        serviceIds: [svc.id],
         language: 'en',
       });
 
