@@ -336,6 +336,79 @@ describe('AiDraftAssistant Component', () => {
     });
     expect(screen.getByTestId('ai-quota-indicator')).toHaveTextContent('1 draft remaining');
     expect(callCount).toBe(2);
+
+    // Verify both generation and regeneration used the original customer feedback, not the draft
+    expect(publicApi.generateAiDraft).toHaveBeenNthCalledWith(
+      1,
+      defaultProps.code,
+      expect.objectContaining({
+        feedback: defaultProps.feedbackText,
+        rating: defaultProps.rating,
+        serviceIds: defaultProps.serviceIds,
+      })
+    );
+    expect(publicApi.generateAiDraft).toHaveBeenNthCalledWith(
+      2,
+      defaultProps.code,
+      expect.objectContaining({
+        feedback: defaultProps.feedbackText,
+        rating: defaultProps.rating,
+        serviceIds: defaultProps.serviceIds,
+      })
+    );
+  });
+
+  it('9b. should use original customer feedback on regenerate even if customer manually edited the draft text', async () => {
+    let callCount = 0;
+    const generateSpy = vi.spyOn(publicApi, 'generateAiDraft').mockImplementation(async () => {
+      callCount++;
+      return {
+        status: 'generated',
+        draft: callCount === 1 ? 'First draft generated.' : 'Fresh regenerated draft from original input.',
+        generationsRemaining: callCount === 1 ? 2 : 1,
+        isReplay: false,
+      };
+    });
+
+    render(<AiDraftAssistant {...defaultProps} />);
+
+    // 1st generation
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument();
+    });
+
+    // Customer manually edits the draft text
+    const draftTextarea = screen.getByTestId('ai-draft-text');
+    fireEvent.change(draftTextarea, {
+      target: { value: 'Customer edited draft text manually in the preview box.' },
+    });
+    expect(draftTextarea).toHaveValue('Customer edited draft text manually in the preview box.');
+
+    // Click Regenerate
+    fireEvent.click(screen.getByTestId('ai-regenerate-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-draft-text')).toHaveValue(
+        'Fresh regenerated draft from original input.'
+      );
+    });
+
+    // Verify 2nd call used original feedbackText rather than the manually edited draft
+    expect(generateSpy).toHaveBeenNthCalledWith(
+      2,
+      defaultProps.code,
+      expect.objectContaining({
+        feedback: defaultProps.feedbackText,
+      })
+    );
+    expect(generateSpy).not.toHaveBeenNthCalledWith(
+      2,
+      defaultProps.code,
+      expect.objectContaining({
+        feedback: 'Customer edited draft text manually in the preview box.',
+      })
+    );
   });
 
   it('10. should disable Regenerate button when quota is exhausted', async () => {

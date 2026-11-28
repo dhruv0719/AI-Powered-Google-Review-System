@@ -179,23 +179,53 @@ export class MockAiProvider implements AiProvider {
       const jsonStart = userMsg.content.indexOf('{');
       if (jsonStart !== -1) {
         const parsed = JSON.parse(userMsg.content.slice(jsonStart));
+        const rating = typeof parsed.experience_rating === 'number' ? parsed.experience_rating : 5;
+        const servicesList =
+          Array.isArray(parsed.selected_services) && parsed.selected_services.length > 0
+            ? parsed.selected_services.join(', ')
+            : null;
+
         if (typeof parsed.customer_feedback === 'string' && parsed.customer_feedback.trim().length > 0) {
           const feedback = parsed.customer_feedback.trim();
-          if (feedback.length < 10 && Array.isArray(parsed.selected_services) && parsed.selected_services.length > 0) {
-            const servicesList = parsed.selected_services.join(', ');
-            return `${feedback} I had a good experience with ${servicesList}.`;
+          const isShortOrSimple =
+            feedback.length <= 40 ||
+            /^(?:i like the shop|good work and nice shop|good work|nice shop|bad work|bad|great|good|okay|terrible|awesome)/i.test(
+              feedback
+            );
+
+          if (isShortOrSimple) {
+            if (servicesList) {
+              if (rating >= 4) {
+                return `I had a great overall experience at this shop. I used their ${servicesList} services, and I'm very satisfied with my experience. Overall, it was a positive visit.`;
+              } else if (rating <= 2) {
+                return `I had an unsatisfactory experience with their ${servicesList} services. ${feedback} Overall, it did not meet my expectations.`;
+              } else {
+                return `I had an average experience with their ${servicesList} services. ${feedback} Overall, it was an okay visit.`;
+              }
+            } else {
+              if (rating >= 4) {
+                return `I had a great overall experience at this shop. ${feedback} Overall, it was a positive visit.`;
+              } else if (rating <= 2) {
+                return `I had an unsatisfactory experience during my visit. ${feedback} It did not meet my expectations.`;
+              } else {
+                return `My visit was average overall. ${feedback}`;
+              }
+            }
+          }
+
+          if (servicesList && !feedback.toLowerCase().includes(parsed.selected_services[0].toLowerCase())) {
+            return `I used their ${servicesList} services. ${feedback}`;
           }
           return feedback;
         }
-        if (Array.isArray(parsed.selected_services) && parsed.selected_services.length > 0) {
-          const servicesList = parsed.selected_services.join(', ');
-          const rating = parsed.experience_rating ?? 5;
+
+        if (servicesList) {
           if (rating >= 4) {
-            return `I had a great overall experience with ${servicesList}. Highly recommend!`;
+            return `I had a great overall experience with their ${servicesList} services. I am satisfied with my visit.`;
           } else if (rating <= 2) {
-            return `I was not satisfied with the ${servicesList} service. It did not meet my expectations.`;
+            return `I was not satisfied with my experience regarding their ${servicesList} services. It did not meet my expectations.`;
           } else {
-            return `The service for ${servicesList} was average. Okay overall experience.`;
+            return `My visit regarding their ${servicesList} services was okay. It was an average overall experience.`;
           }
         }
       }

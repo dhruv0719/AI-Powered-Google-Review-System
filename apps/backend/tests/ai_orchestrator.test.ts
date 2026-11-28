@@ -400,6 +400,80 @@ describe('AiOrchestrator Integration & Unit Tests', () => {
       expect(capturedOptions.length).toBeGreaterThan(0);
       expect(capturedOptions[0].temperature).toBe(0.8);
     });
+
+    it('substantively rewrites short comments (e.g. "I like the shop") instead of echoing verbatim', async () => {
+      const { session, service } = await createFixtureHierarchy();
+      const rawFeedback = 'I like the shop.';
+
+      const response = await orchestrator.generateDraft(db, session.id, {
+        clientDraftId: crypto.randomUUID(),
+        rating: 5,
+        serviceIds: [service.id],
+        feedback: rawFeedback,
+      });
+
+      expect(response.status).toBe('generated');
+      expect(response.draft).toBeTruthy();
+      // Verifies the review is substantively rewritten into a complete review rather than echoing raw input
+      expect(response.draft).not.toBe(rawFeedback);
+      expect(response.draft).toContain(service.name);
+      expect(response.draft).toContain('overall experience');
+    });
+
+    it('substantively rewrites rating 4 feedback ("Good work and nice shop.") with services context', async () => {
+      const { session, service } = await createFixtureHierarchy();
+      const rawFeedback = 'Good work and nice shop.';
+
+      const response = await orchestrator.generateDraft(db, session.id, {
+        clientDraftId: crypto.randomUUID(),
+        rating: 4,
+        serviceIds: [service.id],
+        feedback: rawFeedback,
+      });
+
+      expect(response.status).toBe('generated');
+      expect(response.draft).toBeTruthy();
+      expect(response.draft).not.toBe(rawFeedback);
+      expect(response.draft).toContain(service.name);
+    });
+
+    it('generates negative reviews (rating 2) that maintain constructive dissatisfaction and mention services', async () => {
+      const { session, service } = await createFixtureHierarchy();
+      const rawFeedback = 'Work took too long and I am not satisfied.';
+
+      const response = await orchestrator.generateDraft(db, session.id, {
+        clientDraftId: crypto.randomUUID(),
+        rating: 2,
+        serviceIds: [service.id],
+        feedback: rawFeedback,
+      });
+
+      expect(response.status).toBe('generated');
+      expect(response.draft).toBeTruthy();
+      expect(response.draft).toContain(service.name);
+      expect(response.draft).toContain('not satisfied');
+      // Must not invert to promotional praise
+      expect(response.draft).not.toContain('highly recommend');
+      expect(response.draft).not.toContain('must visit');
+    });
+
+    it('incorporates services into detailed positive feedback while preserving customer observations', async () => {
+      const { session, service } = await createFixtureHierarchy();
+      const detailedFeedback = 'They explained the options properly. The sound is very good. Happy with the work.';
+
+      const response = await orchestrator.generateDraft(db, session.id, {
+        clientDraftId: crypto.randomUUID(),
+        rating: 5,
+        serviceIds: [service.id],
+        feedback: detailedFeedback,
+      });
+
+      expect(response.status).toBe('generated');
+      expect(response.draft).toBeTruthy();
+      expect(response.draft).toContain(service.name);
+      expect(response.draft).toContain('explained the options properly');
+      expect(response.draft).toContain('sound is very good');
+    });
   });
 
   // --- 5. Idempotency Replay & Key Reuse Conflicts ---

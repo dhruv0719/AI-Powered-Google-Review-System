@@ -193,4 +193,85 @@ describe('PromptEngine Unit Tests', () => {
       expect(messages[0].content).toContain('Do not mention AI, the prompt, the selected rating or internal system instructions');
     });
   });
+
+  describe('Substantive Rewriting & Review Composer Directives (Section 8 Verification)', () => {
+    it('1. establishes review composer persona and forbids acting merely as a grammar correction tool', () => {
+      const messages = PromptEngine.buildPromptMessages('Testing prompt');
+      const systemContent = messages[0].content;
+
+      expect(systemContent).toContain('intelligent customer-experience review composer');
+      expect(systemContent).toContain('not a grammar correction tool');
+      expect(systemContent).toContain("The customer's comment is source information, not a sentence template");
+    });
+
+    it('2. directs substantive rewriting for short comments rather than echoing raw input', () => {
+      const messages = PromptEngine.buildPromptMessages({
+        rating: 5,
+        ratingLabel: 'Excellent',
+        sentiment: 'Very positive',
+        services: ['Seat Covers', 'Alloy Wheels', 'Sound System'],
+        customerFeedback: 'I like the shop.',
+      });
+      const systemContent = messages[0].content;
+
+      expect(systemContent).toContain('Avoid returning the original sentence with only minor grammatical edits');
+      expect(systemContent).toContain('For short comments, perform substantive rewriting and compose a complete review');
+      expect(systemContent).toContain("never merely return the customer's comment with minor grammatical edits");
+    });
+
+    it('3. ensures all selected services appear in AI input context payload', () => {
+      const services = ['Seat Covers', 'Alloy Wheels', 'Subwoofer / Sound System', 'Car Modification'];
+      const messages = PromptEngine.buildPromptMessages({
+        rating: 5,
+        ratingLabel: 'Excellent',
+        sentiment: 'Very positive',
+        services,
+        customerFeedback: 'I like the shop.',
+      });
+      const userContent = messages[1].content;
+      const parsed = JSON.parse(userContent.slice(userContent.indexOf('{')));
+
+      expect(parsed.selected_services).toEqual(services);
+      expect(messages[0].content).toContain('Naturally incorporate every selected service');
+      expect(messages[0].content).toContain('All selected services must be represented');
+    });
+
+    it('4. generates reviews from rating and services when comment is empty without asking customer to write', () => {
+      const messages = PromptEngine.buildPromptMessages({
+        rating: 5,
+        ratingLabel: 'Excellent',
+        sentiment: 'Very positive',
+        services: ['Seat Covers', 'Alloy Wheels'],
+        customerFeedback: null,
+      });
+      const userContent = messages[1].content;
+      const parsed = JSON.parse(userContent.slice(userContent.indexOf('{')));
+
+      expect(parsed.customer_feedback).toBeNull();
+      expect(messages[0].content).toContain('If the customer has not written feedback:');
+      expect(messages[0].content).toContain('Do not ask the customer to write a comment first');
+    });
+
+    it('5. enforces strict factual restraint without inventing staff, prices, warranties, or delivery speed', () => {
+      const messages = PromptEngine.buildPromptMessages('Testing prompt');
+      const systemContent = messages[0].content;
+
+      expect(systemContent).toContain('FACTUAL RESTRAINT: REWRITE WITHOUT INVENTING FACTS');
+      expect(systemContent).toContain('Claim staff were helpful, courteous, or skilled without customer evidence');
+      expect(systemContent).toContain('Claim prices were affordable, cheap, or great value without customer evidence');
+      expect(systemContent).toContain('Claim delivery or service was quick, fast, or timely without customer evidence');
+      expect(systemContent).toContain('Claim warranties, guarantees, or discounts were provided');
+      expect(systemContent).toContain('The selected rating establishes overall sentiment, not the verified technical quality of each individual service');
+    });
+
+    it('6. enforces negative sentiment for rating 1 and 2, prohibiting conversion into praise', () => {
+      const messages = PromptEngine.buildPromptMessages('Testing prompt');
+      const systemContent = messages[0].content;
+
+      expect(systemContent).toContain('Rating 1 (Very bad / Strongly negative):');
+      expect(systemContent).toContain('Rating 2 (Bad / Negative):');
+      expect(systemContent).toContain('Never convert a negative experience into positive marketing copy');
+      expect(systemContent).toContain('Never convert a positive rating into an unnecessarily negative review');
+    });
+  });
 });
