@@ -9,7 +9,7 @@ import {
   reserveExternalTab,
   navigateReservedTab,
   closeReservedTab,
-  copyDraftToClipboard,
+  initiateClipboardWrite,
 } from '../utils/googleReview.js';
 
 export interface AiDraftAssistantProps {
@@ -394,11 +394,12 @@ export function AiDraftAssistant({
 
   /**
    * Action 2: "Post on Google"
-   * A. Synchronously attempts to reserve a new blank browser tab via direct user interaction.
-   * B. Copies the exact latest edited draft to clipboard.
-   * C. If copy succeeds: navigates the reserved tab to validated Google Review URL.
-   * D. If popup blocked: transitions button to direct native Google Review link (popup-blocker fallback).
-   * E. If copy fails: closes reserved tab, does not navigate, and shows recoverable error.
+   * A. Synchronously initiates clipboard write within the direct user interaction turn.
+   * B. Synchronously attempts to reserve a new blank browser tab via direct user interaction.
+   * C. Awaits the clipboard write operation.
+   * D. If copy succeeds: navigates the reserved tab to validated Google Review URL.
+   * E. If popup blocked: transitions button to direct native Google Review link (popup-blocker fallback).
+   * F. If copy fails: closes reserved tab, does not navigate, and shows recoverable error.
    */
   const handlePostOnGoogle = async () => {
     const textToCopy = (editedDraftText || activeDraft?.backendDraftText || '').trim();
@@ -412,13 +413,21 @@ export function AiDraftAssistant({
       return;
     }
 
-    // A. Synchronously attempt to reserve a new blank browser tab using direct click interaction
+    // 1. Synchronously initiate clipboard write within the user activation turn BEFORE any popup or await
+    const copyPromise = initiateClipboardWrite(textToCopy);
+
+    // 2. Synchronously attempt to reserve a new blank browser tab within the same click turn
     const reservedTab = reserveExternalTab();
 
-    // Attempt to copy the exact current AI draft to device clipboard
-    const copied = await copyDraftToClipboard(textToCopy);
+    // 3. Await the clipboard operation result
+    let copied = false;
+    try {
+      copied = await copyPromise;
+    } catch {
+      copied = false;
+    }
 
-    // B. If clipboard copying succeeds
+    // 4. Handle navigation or fallback
     if (copied) {
       if (reservedTab) {
         // Navigate the reserved tab to the validated business Google Review URL
@@ -429,17 +438,16 @@ export function AiDraftAssistant({
           setPostState({ status: 'popup_blocked' });
         }
       } else {
-        // D. Popup-blocker fallback:
         // Tab was blocked by browser. Change existing Post on Google control into direct link!
         setPostState({ status: 'popup_blocked' });
       }
     } else {
-      // C. If clipboard copying fails:
+      // If clipboard copying fails: close reserved tab and DO NOT navigate
       closeReservedTab(reservedTab);
       setPostState({
         status: 'copy_failed',
         message:
-          'Draft could not be automatically copied to clipboard. Please copy your draft above, then tap Continue to Google.',
+          'Draft could not be automatically copied to clipboard. Please copy your draft above, then tap Continue to Google Reviews.',
       });
     }
   };
@@ -755,12 +763,15 @@ export function AiDraftAssistant({
             <span
               style={{
                 fontSize: '11px',
-                color: '#707978',
+                color: postState.status === 'copy_failed' ? '#92400E' : '#707978',
                 marginTop: '3px',
                 display: 'block',
+                fontWeight: postState.status === 'copy_failed' ? 600 : 400,
               }}
             >
-              You can edit this suggested review directly before posting.
+              {postState.status === 'copy_failed'
+                ? 'Automatic copy failed. Please select and copy your review draft from the box above manually, then tap Continue to Google Reviews below.'
+                : 'You can edit this suggested review directly before posting.'}
             </span>
           </div>
 
@@ -832,10 +843,11 @@ export function AiDraftAssistant({
                 href={googleReviewUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                data-testid="copy-failed-google-link"
                 style={{
                   alignSelf: 'flex-start',
                   padding: '8px 16px',
-                  backgroundColor: '#006764',
+                  backgroundColor: brandColor || '#006764',
                   color: '#FFFFFF',
                   borderRadius: '8px',
                   fontSize: '13px',
@@ -972,7 +984,9 @@ export function AiDraftAssistant({
 
           {/* Microcopy explaining clipboard copy + Google publication */}
           <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#707978', textAlign: 'center' }}>
-            Your review draft will be copied to your clipboard. Simply paste it into Google to publish!
+            {postState.status === 'copy_failed'
+              ? 'Please copy your draft from the box above before continuing to Google.'
+              : 'Your review draft will be copied to your clipboard. Simply paste it into Google to publish!'}
           </p>
         </div>
       )}

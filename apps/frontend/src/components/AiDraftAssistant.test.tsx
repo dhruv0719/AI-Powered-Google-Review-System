@@ -629,7 +629,94 @@ describe('AiDraftAssistant Component', () => {
     );
   });
 
-  it('16. should close reserved blank tab and NOT navigate when clipboard copy fails', async () => {
+  it('15b. should initiate clipboard writing synchronously before window.open to preserve user gesture and focus', async () => {
+    const draftText = 'Order test draft text.';
+    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+      status: 'generated',
+      draft: draftText,
+      generationsRemaining: 2,
+      isReplay: false,
+    });
+
+    const callOrder: string[] = [];
+    const writeTextSpy = vi.fn().mockImplementation(() => {
+      callOrder.push('clipboard.writeText');
+      return Promise.resolve();
+    });
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: writeTextSpy,
+      },
+    });
+
+    const mockTab = {
+      location: { href: '' },
+      close: vi.fn(),
+      closed: false,
+    };
+    vi.spyOn(window, 'open').mockImplementation(() => {
+      callOrder.push('window.open');
+      return mockTab as any;
+    });
+
+    render(<AiDraftAssistant {...defaultProps} googleReviewUrl="https://g.page/r/test/review" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('post-to-google-button'));
+
+    await waitFor(() => {
+      expect(writeTextSpy).toHaveBeenCalledWith(draftText);
+    });
+
+    // Proves writeText was initiated BEFORE window.open
+    expect(callOrder).toEqual(['clipboard.writeText', 'window.open']);
+  });
+
+  it('15c. should never call readText, read, or query clipboard-read permission', async () => {
+    const draftText = 'No clipboard read test.';
+    vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
+      status: 'generated',
+      draft: draftText,
+      generationsRemaining: 2,
+      isReplay: false,
+    });
+
+    const readTextSpy = vi.fn();
+    const readSpy = vi.fn();
+    const querySpy = vi.fn();
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+        readText: readTextSpy,
+        read: readSpy,
+      },
+      permissions: {
+        query: querySpy,
+      },
+    });
+    const mockTab = { location: { href: '' }, close: vi.fn(), closed: false };
+    vi.spyOn(window, 'open').mockReturnValue(mockTab as any);
+
+    render(<AiDraftAssistant {...defaultProps} googleReviewUrl="https://g.page/r/test/review" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /polish with ai/i }));
+    await waitFor(() => expect(screen.getByTestId('ai-draft-card')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('post-to-google-button'));
+
+    await waitFor(() => {
+      expect(mockTab.location.href).toBe('https://g.page/r/test/review');
+    });
+
+    // Assert strictly WRITE-only clipboard interaction
+    expect(readTextSpy).not.toHaveBeenCalled();
+    expect(readSpy).not.toHaveBeenCalled();
+    expect(querySpy).not.toHaveBeenCalled();
+  });
+
+  it('16. should close reserved blank tab, NOT navigate, and show clear manual copy instructions when clipboard copy fails', async () => {
     const draftText = 'Polished draft text.';
     vi.spyOn(publicApi, 'generateAiDraft').mockResolvedValue({
       status: 'generated',
@@ -670,9 +757,23 @@ describe('AiDraftAssistant Component', () => {
     expect(mockTab.close).toHaveBeenCalledTimes(1);
     // Location was NOT navigated to Google!
     expect(mockTab.location.href).toBe('');
-    expect(screen.getByTestId('ai-copy-failed-alert')).toHaveTextContent(
-      'Draft could not be automatically copied to clipboard'
-    );
+
+    // Error alert informs user that automatic copying failed
+    const alert = screen.getByTestId('ai-copy-failed-alert');
+    expect(alert).toHaveTextContent('Draft could not be automatically copied to clipboard');
+
+    // Direct link to Google Reviews is provided
+    const continueLink = screen.getByTestId('copy-failed-google-link');
+    expect(continueLink).toHaveAttribute('href', 'https://g.page/r/test/review');
+    expect(continueLink).toHaveAttribute('target', '_blank');
+
+    // Textarea remains editable with the draft text intact
+    const textarea = screen.getByTestId('ai-draft-text');
+    expect(textarea).toHaveValue(draftText);
+
+    // UI does NOT claim that draft was copied to clipboard
+    expect(screen.queryByTestId('ai-post-copied-toast')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Your review draft will be copied to your clipboard/i)).not.toBeInTheDocument();
   });
 
   // =========================================================================
